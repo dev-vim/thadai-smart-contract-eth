@@ -29,10 +29,19 @@ contract DeployThadaiCoreV1 is Script {
 
     uint8 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
 
+    uint256 public constant INFLATION_WINDOW_IN_HOURS = 1;
+
+    uint8 public constant INFLATION_PERCENT_PER_WINDOW = 10;
+
     function deployThadaiCoreV1() public returns (ThadaiCoreV1) {
         vm.startBroadcast();
-        ThadaiCoreV1 thadaiCoreV1 =
-            new ThadaiCoreV1(BASE_ACCESS_PRICE_IN_WEI, MINIMUM_PAYMENT_AMOUNT_IN_WEI, WITHDRAW_COOLDOWN_PERIOD_IN_DAYS);
+        ThadaiCoreV1 thadaiCoreV1 = new ThadaiCoreV1(
+            BASE_ACCESS_PRICE_IN_WEI,
+            MINIMUM_PAYMENT_AMOUNT_IN_WEI,
+            WITHDRAW_COOLDOWN_PERIOD_IN_DAYS,
+            INFLATION_WINDOW_IN_HOURS,
+            INFLATION_PERCENT_PER_WINDOW
+        );
         vm.stopBroadcast();
         return thadaiCoreV1;
     }

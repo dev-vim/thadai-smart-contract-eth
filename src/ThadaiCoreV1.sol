@@ -18,8 +18,10 @@ contract ThadaiCoreV1 {
     struct UserAccess {
         uint256 balance; // Total balance deposited by user
         uint256 accessUntil; // Timestamp until which user has access
-        uint256 totalPaid; // Total amount paid by user (for analytics)
+        uint256 lastPurchaseTime; // Last time user purchased access
         uint256 lastRedemptionTime; // Last time user redeemed/withdrew funds
+        uint256 totalAccessSecondsPurchased; // Total access time purchased by user
+        uint256 totalPaid; // Total amount paid by user
     }
 
     // Contract configuration
@@ -34,6 +36,10 @@ contract ThadaiCoreV1 {
 
     /// @notice Time period users must wait between withdrawals
     uint256 public withdrawCooldownInDays;
+
+    /// @notice User inflation parameters for dynamic pricing
+    uint256 public inflationWindowInHours;
+    uint256 public inflationPercent;
 
     /// @notice Mapping from user address to their access information
     mapping(address => UserAccess) public userAccess;
@@ -61,12 +67,22 @@ contract ThadaiCoreV1 {
      * @param _baseAccessPrice Price for 1 second of access in wei
      * @param _minimumPaymentAmount Minimum payment required to purchase access
      * @param _withdrawCooldownInDays Days users must wait between withdrawals
+     * @param _inflationWindowInHours Hours within which inflation applies
+     * @param _inflationPercent Percent increase in price during inflation window
      */
-    constructor(uint256 _baseAccessPrice, uint256 _minimumPaymentAmount, uint256 _withdrawCooldownInDays) {
+    constructor(
+        uint256 _baseAccessPrice,
+        uint256 _minimumPaymentAmount,
+        uint256 _withdrawCooldownInDays,
+        uint256 _inflationWindowInHours,
+        uint256 _inflationPercent
+    ) {
         owner = msg.sender;
         baseAccessPrice = _baseAccessPrice;
         minimumPaymentAmount = _minimumPaymentAmount;
         withdrawCooldownInDays = _withdrawCooldownInDays * 1 days;
+        inflationWindowInHours = _inflationWindowInHours * 1 hours;
+        inflationPercent = _inflationPercent;
     }
 
     /**
@@ -78,16 +94,17 @@ contract ThadaiCoreV1 {
         if (msg.value < minimumPaymentAmount) {
             revert PaymentBelowMinimumAmount(minimumPaymentAmount);
         }
-
         UserAccess storage access = userAccess[msg.sender];
-
-        // Calculate how much access the payment can buy
-        uint256 unlockedAccessSeconds = calculateAccessFromPayment(msg.value);
-
-        // Calculate new access expiration
+        // Calculate how many access seconds the payment can buy, considering inflation if applicable
+        uint256 unlockedAccessSeconds;
         uint256 currentTime = block.timestamp;
+        if (access.lastPurchaseTime != 0 && currentTime - access.lastPurchaseTime < inflationWindowInHours) {
+            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, inflationPercent);
+        } else {
+            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, 0);
+        }
+        // Calculate new access expiration
         uint256 newAccessUntil;
-
         if (access.accessUntil > currentTime) {
             // Extend existing access with all purchased seconds
             newAccessUntil = access.accessUntil + unlockedAccessSeconds;
@@ -95,11 +112,12 @@ contract ThadaiCoreV1 {
             // Start new access period
             newAccessUntil = currentTime + unlockedAccessSeconds;
         }
-
         // Update user access information
         access.balance += msg.value;
         access.accessUntil = newAccessUntil;
         access.totalPaid += msg.value;
+        access.lastPurchaseTime = currentTime;
+        access.totalAccessSecondsPurchased += unlockedAccessSeconds;
 
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }
@@ -114,7 +132,6 @@ contract ThadaiCoreV1 {
     function checkAccess(address _user) public view returns (bool hasAccess, uint256 remainingSeconds) {
         UserAccess storage access = userAccess[_user];
         uint256 currentTime = block.timestamp;
-
         if (access.accessUntil > currentTime) {
             hasAccess = true;
             remainingSeconds = access.accessUntil - currentTime;
@@ -136,7 +153,7 @@ contract ThadaiCoreV1 {
         }
 
         // User can only withdraw after redemption cooldown
-        if (!_canUserWithdraw(msg.sender)) {
+        if (!_canUserWithdraw(access)) {
             revert WithdrawalCooldownActive(block.timestamp - access.lastRedemptionTime);
         }
 
@@ -157,37 +174,45 @@ contract ThadaiCoreV1 {
      * @notice Get comprehensive access information for a user
      * @dev Returns all user access data including balance, access status, and withdrawal eligibility
      * @param _user Address of the user to query
-     * @return accessUntil Timestamp when access expires
      * @return balance User's current balance in contract
-     * @return totalPaid Total amount user has paid historically
+     * @return accessUntil Timestamp when access expires
+     * @return lastPurchaseTime Last time user purchased access
      * @return lastRedemptionTime Last time user withdrew funds (0 if never withdrawn)
+     * @return totalAccessSecondsPurchased Total access time user has purchased historically
+     * @return totalPaid Total amount user has paid historically
      * @return canWithdraw True if user can withdraw now (cooldown passed)
      * @return cooldownRemaining Time remaining until next withdrawal (0 if can withdraw)
+     * @return applicableInflationPercent Inflation percent applicable to user based on last purchase time
      */
-    function getUserAccessInfo(address _user)
-        public
-        view
-        returns (
-            uint256 accessUntil,
-            uint256 balance,
-            uint256 totalPaid,
-            uint256 lastRedemptionTime,
-            bool canWithdraw,
-            uint256 cooldownRemaining
-        )
-    {
+    function getUserAccessInfo(address _user) public view returns (
+        uint256 balance,
+        uint256 accessUntil,
+        uint256 lastPurchaseTime,
+        uint256 lastRedemptionTime,
+        uint256 totalAccessSecondsPurchased,
+        uint256 totalPaid,
+        bool canWithdraw,
+        uint256 cooldownRemaining,
+        uint256 applicableInflationPercent
+    ) {
         UserAccess storage access = userAccess[_user];
-
-        canWithdraw = _canUserWithdraw(_user);
-        cooldownRemaining = _getWithdrawalCooldownRemaining(_user);
-
+        canWithdraw = _canUserWithdraw(access);
+        cooldownRemaining = _getWithdrawalCooldownRemaining(access);
+        if (block.timestamp - access.lastPurchaseTime <= inflationWindowInHours) {
+            applicableInflationPercent = inflationPercent;
+        } else {
+            applicableInflationPercent = 0;
+        }
         return (
-            access.accessUntil,
             access.balance,
-            access.totalPaid,
+            access.accessUntil,
+            access.lastPurchaseTime,
             access.lastRedemptionTime,
+            access.totalAccessSecondsPurchased,
+            access.totalPaid,
             canWithdraw,
-            cooldownRemaining
+            cooldownRemaining,
+            applicableInflationPercent
         );
     }
 
@@ -195,19 +220,17 @@ contract ThadaiCoreV1 {
      * @notice Check if user can withdraw based on redemption cooldown
      * @dev Internal function to check withdrawal eligibility. First-time users can withdraw immediately,
      *      returning users must wait for cooldown period to pass.
-     * @param _user Address to check
+     * @param userAccessData Storage reference to the user's access data
      * @return canWithdraw True if user can withdraw now
      */
-    function _canUserWithdraw(address _user) internal view returns (bool canWithdraw) {
-        UserAccess storage access = userAccess[_user];
-
+    function _canUserWithdraw(UserAccess storage userAccessData) internal view returns (bool canWithdraw) {
         // If user has never withdrawn before, they can withdraw immediately
-        if (access.lastRedemptionTime == 0) {
+        if (userAccessData.lastRedemptionTime == 0) {
             return true;
         }
 
         // Check if enough time has passed since last withdrawal
-        uint256 timeSinceLastWithdrawal = block.timestamp - access.lastRedemptionTime;
+        uint256 timeSinceLastWithdrawal = block.timestamp - userAccessData.lastRedemptionTime;
         return timeSinceLastWithdrawal >= withdrawCooldownInDays;
     }
 
@@ -215,17 +238,19 @@ contract ThadaiCoreV1 {
      * @notice Get time remaining until user can withdraw again
      * @dev Internal function to calculate remaining cooldown time. Returns 0 if user can withdraw now
      *      or has never withdrawn before.
-     * @param _user Address to check
+     * @param _userAccessData Storage reference to the user's access data
      * @return cooldownRemaining Time remaining in seconds (0 if can withdraw now)
      */
-    function _getWithdrawalCooldownRemaining(address _user) internal view returns (uint256 cooldownRemaining) {
-        UserAccess storage access = userAccess[_user];
-
-        if (access.lastRedemptionTime == 0) {
+    function _getWithdrawalCooldownRemaining(UserAccess storage _userAccessData)
+        internal
+        view
+        returns (uint256 cooldownRemaining)
+    {
+        if (_userAccessData.lastRedemptionTime == 0) {
             return 0;
         }
 
-        uint256 timeSinceLastWithdrawal = block.timestamp - access.lastRedemptionTime;
+        uint256 timeSinceLastWithdrawal = block.timestamp - _userAccessData.lastRedemptionTime;
 
         if (timeSinceLastWithdrawal >= withdrawCooldownInDays) {
             return 0;
@@ -238,10 +263,16 @@ contract ThadaiCoreV1 {
      * @notice Calculate how many seconds of access a payment amount would provide
      * @dev Public view function to calculate access time from payment amount using base price
      * @param _payment Amount in wei to calculate access for
+     * @param _applicableInflationPercent Inflation percent to apply to base price
      * @return accessSeconds Number of seconds of access the payment would provide
      */
-    function calculateAccessFromPayment(uint256 _payment) public view returns (uint256 accessSeconds) {
-        return _payment / baseAccessPrice;
+    function calculateAccessFromPayment(uint256 _payment, uint256 _applicableInflationPercent)
+        public
+        view
+        returns (uint256 accessSeconds)
+    {
+        uint256 adjustedPrice = baseAccessPrice + ((baseAccessPrice * _applicableInflationPercent) / 100);
+        accessSeconds = _payment / adjustedPrice;
     }
 
     /**

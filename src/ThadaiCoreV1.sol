@@ -184,21 +184,25 @@ contract ThadaiCoreV1 {
      * @return cooldownRemaining Time remaining until next withdrawal (0 if can withdraw)
      * @return applicableInflationPercent Inflation percent applicable to user based on last purchase time
      */
-    function getUserAccessInfo(address _user) public view returns (
-        uint256 balance,
-        uint256 accessUntil,
-        uint256 lastPurchaseTime,
-        uint256 lastRedemptionTime,
-        uint256 totalAccessSecondsPurchased,
-        uint256 totalPaid,
-        bool canWithdraw,
-        uint256 cooldownRemaining,
-        uint256 applicableInflationPercent
-    ) {
+    function getUserAccessInfo(address _user)
+        public
+        view
+        returns (
+            uint256 balance,
+            uint256 accessUntil,
+            uint256 lastPurchaseTime,
+            uint256 lastRedemptionTime,
+            uint256 totalAccessSecondsPurchased,
+            uint256 totalPaid,
+            bool canWithdraw,
+            uint256 cooldownRemaining,
+            uint256 applicableInflationPercent
+        )
+    {
         UserAccess storage access = userAccess[_user];
         canWithdraw = _canUserWithdraw(access);
         cooldownRemaining = _getWithdrawalCooldownRemaining(access);
-        if (block.timestamp - access.lastPurchaseTime <= inflationWindowInHours) {
+        if (access.lastPurchaseTime != 0 && block.timestamp - access.lastPurchaseTime <= inflationWindowInHours) {
             applicableInflationPercent = inflationPercent;
         } else {
             applicableInflationPercent = 0;
@@ -224,11 +228,14 @@ contract ThadaiCoreV1 {
      * @return canWithdraw True if user can withdraw now
      */
     function _canUserWithdraw(UserAccess storage userAccessData) internal view returns (bool canWithdraw) {
+        // If user has no balance, they cannot withdraw
+        if (userAccessData.balance == 0) {
+            return false;
+        }
         // If user has never withdrawn before, they can withdraw immediately
         if (userAccessData.lastRedemptionTime == 0) {
             return true;
         }
-
         // Check if enough time has passed since last withdrawal
         uint256 timeSinceLastWithdrawal = block.timestamp - userAccessData.lastRedemptionTime;
         return timeSinceLastWithdrawal >= withdrawCooldownInDays;

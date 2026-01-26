@@ -536,6 +536,34 @@ contract ThadaiCoreV1Test is Test {
         assertEq(accessSeconds, 0);
     }
 
+    // =========== Get Access Pricing Info Tests ==========
+
+    function test_GetAccessPricingInfo_ReturnsCorrectValues() public view {
+        (
+            uint256 basePrice,
+            uint256 minPayment,
+            uint256 cooldownDays,
+            uint256 inflationWindowHours,
+            uint256 inflationPercent
+        ) = thadaiCoreV1Test.getAccessPricingInfo();
+
+        assertEq(basePrice, BASE_ACCESS_PRICE);
+        assertEq(minPayment, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(cooldownDays, WITHDRAW_COOLDOWN_PERIOD_IN_DAYS);
+        assertEq(inflationWindowHours, INFLATION_WINDOW_IN_HOURS);
+        assertEq(inflationPercent, INFLATION_PERCENT_PER_WINDOW);
+    }
+
+    function test_GetAccessPricingInfo_ValuesAreConsistentWithState() public view {
+        (uint256 basePrice,, uint256 cooldownDays, uint256 inflationWindowHours, uint256 inflationPercent) =
+            thadaiCoreV1Test.getAccessPricingInfo();
+
+        assertEq(basePrice, thadaiCoreV1Test.baseAccessPrice());
+        assertEq(cooldownDays, thadaiCoreV1Test.withdrawCooldownInDays() / 1 days);
+        assertEq(inflationWindowHours, thadaiCoreV1Test.inflationWindowInHours() / 1 hours);
+        assertEq(inflationPercent, thadaiCoreV1Test.inflationPercent());
+    }
+
     // ============ Get Contract Balance Tests ============
 
     function test_GetContractBalance_EmptyContract() public view {

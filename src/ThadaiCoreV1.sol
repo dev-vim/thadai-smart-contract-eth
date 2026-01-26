@@ -221,6 +221,19 @@ contract ThadaiCoreV1 {
     }
 
     /**
+     * @notice Get current pricing and cooldown configuration
+     * @dev Returns the base access price, minimum payment, withdrawal cooldown, inflation window, and inflation percent
+     * @return _baseAccessPrice Price for 1 second of access in wei
+     * @return _minimumPaymentAmount Minimum payment required to purchase access
+     * @return _withdrawCooldownInDays Days users must wait between withdrawals
+     * @return _inflationWindowInHours Hours within which inflation applies
+     * @return _inflationPercent Percent increase in price during inflation window
+     */
+    function getAccessPricingInfo() public view returns (uint256 _baseAccessPrice, uint256 _minimumPaymentAmount, uint256 _withdrawCooldownInDays, uint256 _inflationWindowInHours, uint256 _inflationPercent) {
+        return (baseAccessPrice, minimumPaymentAmount, withdrawCooldownInDays / 1 days, inflationWindowInHours / 1 hours, inflationPercent);
+    }
+
+    /**
      * @notice Check if user can withdraw based on redemption cooldown
      * @dev Internal function to check withdrawal eligibility. First-time users can withdraw immediately,
      *      returning users must wait for cooldown period to pass.

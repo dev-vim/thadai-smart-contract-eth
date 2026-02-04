@@ -59,6 +59,7 @@ contract ThadaiCoreV1 {
     /// @notice Emitted when contract configuration is updated
     /// @param newBasePrice New price per second of access
     /// @param newRedemptionCooldown New withdrawal cooldown period
+    /// TODO: Remove this (and perform subsequent downstream ABI updations)
     event ConfigurationUpdated(uint256 newBasePrice, uint256 newRedemptionCooldown);
 
     /**

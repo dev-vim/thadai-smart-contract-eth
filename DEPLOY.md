@@ -1,6 +1,10 @@
-# Deploying ThadaiCoreV1 to Anvil
+<p align="center">
+   <img src="img/logo_transparent_bg_1000px.png" alt="Thadai Logo" height="300" />
+</p>
 
-This guide will walk you through deploying the ThadaiCoreV1 contract to a local Anvil instance.
+# Deploying ThadaiCoreV1
+
+This guide will walk you through deploying the ThadaiCoreV1 contract to a local Anvil instance. To deploy to a testnet or mainnet, adjust the RPC URL and private key accordingly.
 
 ## Prerequisites
 
@@ -56,9 +60,9 @@ forge script script/DeployThadaiCoreV1.s.sol:DeployThadaiCoreV1 \
 
 The contract will be deployed with these constructor parameters (defined in `DeployThadaiCoreV1.s.sol`):
 
-- **Base Access Price**: `20e10` wei (20 gwei per second)
-- **Minimum Payment**: `24000e10` wei (24000 gwei)
-- **Withdrawal Cooldown**: `1` day
+- **Base Access Price**
+- **Minimum Payment**
+- **Withdrawal Cooldown**
 
 ## Step 3: Verify Deployment
 
@@ -105,13 +109,7 @@ Should return `0x000000000000000000000000000000000000000000000000000000000000000
 
 ## Step 4: Update Extension Configuration
 
-Make sure the contract address in your Chrome extension matches the deployed address:
-
-**File**: `thadai-chrome-extension/src/core-eth/eth-contract-metadata.js`
-
-```javascript
-const THADAI_ADDRESS = "0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519"; // Update if different
-```
+Make sure the contract address in your Chrome extension matches the deployed address.
 
 ## Troubleshooting
 

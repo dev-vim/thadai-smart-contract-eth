@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.19;
+
+import {Script} from "forge-std/Script.sol";
+import {ThadaiCoreV1} from "../src/ThadaiCoreV1.sol";
+import {DeployThadaiCoreV1} from "./DeployThadaiCoreV1.s.sol";
+
+contract DeployThadaiCoreV1Test is Script {
+    function run() external returns (ThadaiCoreV1) {
+        uint256 base_access_price_in_wei = 20e10;
+        uint256 minimum_payment_amount_in_wei = 24000e10;
+        uint8 withdraw_cooldown_period_in_days = 1;
+        uint256 inflation_window_in_hours = 1;
+        uint8 inflation_percent_per_window = 10;
+        DeployThadaiCoreV1 deployer = new DeployThadaiCoreV1();
+        return deployer.deployThadaiCoreV1(
+            base_access_price_in_wei,
+            minimum_payment_amount_in_wei,
+            withdraw_cooldown_period_in_days,
+            inflation_window_in_hours,
+            inflation_percent_per_window
+        );
+    }
+}

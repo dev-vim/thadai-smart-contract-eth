@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+
 /**
  * @title ThadaiCoreV1
  * @notice Access control contract with a payment based approach and withdrawal cooldowns
@@ -8,11 +10,12 @@ pragma solidity ^0.8.19;
  *      Implements time-based access control with configurable pricing and withdrawal restrictions.
  * @author developer.thevimal98@gmail.com
  */
-contract ThadaiCoreV1 {
+contract ThadaiCoreV1 is ReentrancyGuard {
     // Errors
     error PaymentBelowMinimumAmount(uint256 minimumAmount);
     error NoBalanceToWithdraw();
     error WithdrawalCooldownActive(uint256 cooldownRemaining);
+    error WithdrawalTransferFailed(address user, uint256 amount);
 
     // Struct to store user access information
     struct UserAccess {
@@ -137,7 +140,7 @@ contract ThadaiCoreV1 {
      * @dev Allows user (msg.sender) to withdraw their entire balance if eligible. Enforces redemption cooldown
      *      to prevent frequent withdrawals. Resets user data after successful withdrawal.
      */
-    function withdrawFunds() external {
+    function withdrawFunds() external nonReentrant {
         UserAccess storage access = userAccess[msg.sender];
         if (access.balance == 0) {
             revert NoBalanceToWithdraw();
@@ -156,7 +159,10 @@ contract ThadaiCoreV1 {
         access.lastRedemptionTime = block.timestamp;
 
         // Transfer funds
-        payable(msg.sender).transfer(withdrawAmount);
+        (bool transferSuccess,) = payable(msg.sender).call{value: withdrawAmount}("");
+        if (!transferSuccess) {
+            revert WithdrawalTransferFailed(msg.sender, withdrawAmount);
+        }
 
         emit UserWithdrawn(msg.sender, withdrawAmount);
     }

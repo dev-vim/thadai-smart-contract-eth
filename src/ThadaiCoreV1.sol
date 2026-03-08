@@ -96,30 +96,20 @@ contract ThadaiCoreV1 {
             revert PaymentBelowMinimumAmount(minimumPaymentAmount);
         }
         UserAccess storage access = userAccess[msg.sender];
-        // Calculate how many access seconds the payment can buy, considering inflation if applicable
-        uint256 unlockedAccessSeconds;
+        uint256 unlockedAccessSeconds =
+            calculateAccessFromPayment(msg.value, _getApplicableInflationPercent(access.lastPurchaseTime));
         uint256 currentTime = block.timestamp;
-        if (access.lastPurchaseTime != 0 && currentTime - access.lastPurchaseTime < inflationWindowInHours) {
-            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, inflationPercent);
-        } else {
-            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, 0);
-        }
-        // Calculate new access expiration
         uint256 newAccessUntil;
         if (access.accessUntil > currentTime) {
-            // Extend existing access with all purchased seconds
             newAccessUntil = access.accessUntil + unlockedAccessSeconds;
         } else {
-            // Start new access period
             newAccessUntil = currentTime + unlockedAccessSeconds;
         }
-        // Update user access information
         access.balance += msg.value;
         access.accessUntil = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
         access.totalAccessSecondsPurchased += unlockedAccessSeconds;
-
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }
 
@@ -203,11 +193,7 @@ contract ThadaiCoreV1 {
         UserAccess storage access = userAccess[_user];
         canWithdraw = _canUserWithdraw(access);
         cooldownRemaining = _getWithdrawalCooldownRemaining(access);
-        if (access.lastPurchaseTime != 0 && block.timestamp - access.lastPurchaseTime <= inflationWindowInHours) {
-            applicableInflationPercent = inflationPercent;
-        } else {
-            applicableInflationPercent = 0;
-        }
+        applicableInflationPercent = _getApplicableInflationPercent(access.lastPurchaseTime);
         return (
             access.balance,
             access.accessUntil,
@@ -230,8 +216,24 @@ contract ThadaiCoreV1 {
      * @return _inflationWindowInHours Hours within which inflation applies
      * @return _inflationPercent Percent increase in price during inflation window
      */
-    function getAccessPricingInfo() public view returns (uint256 _baseAccessPrice, uint256 _minimumPaymentAmount, uint256 _withdrawCooldownInDays, uint256 _inflationWindowInHours, uint256 _inflationPercent) {
-        return (baseAccessPrice, minimumPaymentAmount, withdrawCooldownInDays / 1 days, inflationWindowInHours / 1 hours, inflationPercent);
+    function getAccessPricingInfo()
+        public
+        view
+        returns (
+            uint256 _baseAccessPrice,
+            uint256 _minimumPaymentAmount,
+            uint256 _withdrawCooldownInDays,
+            uint256 _inflationWindowInHours,
+            uint256 _inflationPercent
+        )
+    {
+        return (
+            baseAccessPrice,
+            minimumPaymentAmount,
+            withdrawCooldownInDays / 1 days,
+            inflationWindowInHours / 1 hours,
+            inflationPercent
+        );
     }
 
     /**
@@ -278,6 +280,18 @@ contract ThadaiCoreV1 {
         } else {
             return withdrawCooldownInDays - timeSinceLastWithdrawal;
         }
+    }
+
+    /**
+     * @notice Internal function to determine applicable inflation percent based on last purchase time
+     * @param lastPurchaseTime Last time user purchased access
+     * @return percent Inflation percent to apply
+     */
+    function _getApplicableInflationPercent(uint256 lastPurchaseTime) internal view returns (uint256 percent) {
+        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowInHours) {
+            return inflationPercent;
+        }
+        return 0;
     }
 
     /**

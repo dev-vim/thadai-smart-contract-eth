@@ -28,9 +28,6 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     }
 
     // Contract configuration
-    /// @notice Owner of the contract with administrative privileges
-    address public owner;
-
     /// @notice Price for 1 second of access in wei
     uint256 public baseAccessPrice;
 
@@ -59,15 +56,9 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     /// @param amount Amount of ETH withdrawn
     event UserWithdrawn(address indexed user, uint256 amount);
 
-    /// @notice Emitted when contract configuration is updated
-    /// @param newBasePrice New price per second of access
-    /// @param newRedemptionCooldown New withdrawal cooldown period
-    /// TODO: Remove this (and perform subsequent downstream ABI updations)
-    event ConfigurationUpdated(uint256 newBasePrice, uint256 newRedemptionCooldown);
-
     /**
      * @notice Initialize the contract with configuration parameters
-     * @dev Constructor sets initial configuration and assigns contract owner
+     * @dev Constructor sets initial values for access pricing, minimum payment, withdrawal cooldown, and inflation parameters
      * @param _baseAccessPrice Price for 1 second of access in wei
      * @param _minimumPaymentAmount Minimum payment required to purchase access
      * @param _withdrawCooldownInDays Days users must wait between withdrawals
@@ -81,7 +72,6 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         uint256 _inflationWindowInHours,
         uint256 _inflationPercent
     ) {
-        owner = msg.sender;
         baseAccessPrice = _baseAccessPrice;
         minimumPaymentAmount = _minimumPaymentAmount;
         withdrawCooldownInDays = _withdrawCooldownInDays * 1 days;

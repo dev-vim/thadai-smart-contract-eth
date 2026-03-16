@@ -30,16 +30,6 @@ contract ThadaiCoreV1Test is Test {
 
     // ============ Constructor Tests ============
 
-    function test_Constructor_SetsOwner() public {
-        DeployThadaiCoreV1Test deployer = new DeployThadaiCoreV1Test();
-        ThadaiCoreV1 newContract = deployer.run();
-
-        address owner = newContract.owner();
-        assertTrue(owner != address(0));
-
-        assertEq(owner, thadaiCoreV1Test.owner());
-    }
-
     function test_Constructor_SetsBaseAccessPrice() public view {
         assertEq(thadaiCoreV1Test.baseAccessPrice(), BASE_ACCESS_PRICE);
     }

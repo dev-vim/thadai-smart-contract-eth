@@ -13,9 +13,9 @@ contract ThadaiCoreV1Test is Test {
 
     uint256 public constant MINIMUM_PAYMENT_AMOUNT = 24000e10;
 
-    uint8 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
+    uint256 public constant WITHDRAW_COOLDOWN_PERIOD = 86400; // 1 day in seconds
 
-    uint256 public constant INFLATION_WINDOW_IN_HOURS = 1;
+    uint256 public constant INFLATION_WINDOW = 3600; // 1 hour in seconds
 
     uint8 public constant INFLATION_PERCENT_PER_WINDOW = 10;
 
@@ -30,16 +30,6 @@ contract ThadaiCoreV1Test is Test {
 
     // ============ Constructor Tests ============
 
-    function test_Constructor_SetsOwner() public {
-        DeployThadaiCoreV1Test deployer = new DeployThadaiCoreV1Test();
-        ThadaiCoreV1 newContract = deployer.run();
-
-        address owner = newContract.owner();
-        assertTrue(owner != address(0));
-
-        assertEq(owner, thadaiCoreV1Test.owner());
-    }
-
     function test_Constructor_SetsBaseAccessPrice() public view {
         assertEq(thadaiCoreV1Test.baseAccessPrice(), BASE_ACCESS_PRICE);
     }
@@ -49,7 +39,7 @@ contract ThadaiCoreV1Test is Test {
     }
 
     function test_Constructor_SetsWithdrawCooldownInDays() public view {
-        assertEq(thadaiCoreV1Test.withdrawCooldownInDays(), WITHDRAW_COOLDOWN_PERIOD_IN_DAYS * 1 days);
+        assertEq(thadaiCoreV1Test.withdrawCooldownInDays(), WITHDRAW_COOLDOWN_PERIOD);
     }
 
     // ============ Purchase Access Tests ============
@@ -157,7 +147,7 @@ contract ThadaiCoreV1Test is Test {
         // Since we're past the expiry, secondAccessUntil should be >= purchaseTimeBefore
         // and it should be in the future relative to when we purchased
         uint256 applicableInflation = 0;
-        if (block.timestamp - purchaseTimeBefore < INFLATION_WINDOW_IN_HOURS) {
+        if (block.timestamp - purchaseTimeBefore < INFLATION_WINDOW) {
             applicableInflation = INFLATION_PERCENT_PER_WINDOW;
         }
         uint256 expectedAccessSeconds =
@@ -510,6 +500,18 @@ contract ThadaiCoreV1Test is Test {
         assertGt(applicableInflationPercent, 0);
     }
 
+    function test_Inflation_DoesNotApplyOnBoundary() public {
+        // User purchases access
+        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        vm.prank(user1);
+        thadaiCoreV1Test.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        // Move time to exactly inflation window boundary
+        vm.warp(block.timestamp + INFLATION_WINDOW);
+        // Check inflation percent is NOT applied (should be 0)
+        (,,,,,,,, uint256 applicableInflationPercent) = thadaiCoreV1Test.getUserAccessInfo(user1);
+        assertEq(applicableInflationPercent, 0);
+    }
+
     // ============ Calculate Access From Payment Tests ============
 
     function test_CalculateAccessFromPayment_MinimumPayment() public view {
@@ -549,8 +551,8 @@ contract ThadaiCoreV1Test is Test {
 
         assertEq(basePrice, BASE_ACCESS_PRICE);
         assertEq(minPayment, MINIMUM_PAYMENT_AMOUNT);
-        assertEq(cooldownDays, WITHDRAW_COOLDOWN_PERIOD_IN_DAYS);
-        assertEq(inflationWindowHours, INFLATION_WINDOW_IN_HOURS);
+        assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, WITHDRAW_COOLDOWN_PERIOD);
+        assertEq(inflationWindowHours * INFLATION_WINDOW, INFLATION_WINDOW);
         assertEq(inflationPercent, INFLATION_PERCENT_PER_WINDOW);
     }
 
@@ -559,8 +561,8 @@ contract ThadaiCoreV1Test is Test {
             thadaiCoreV1Test.getAccessPricingInfo();
 
         assertEq(basePrice, thadaiCoreV1Test.baseAccessPrice());
-        assertEq(cooldownDays, thadaiCoreV1Test.withdrawCooldownInDays() / 1 days);
-        assertEq(inflationWindowHours, thadaiCoreV1Test.inflationWindowInHours() / 1 hours);
+        assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, thadaiCoreV1Test.withdrawCooldownInDays());
+        assertEq(inflationWindowHours * INFLATION_WINDOW, thadaiCoreV1Test.inflationWindowInHours());
         assertEq(inflationPercent, thadaiCoreV1Test.inflationPercent());
     }
 

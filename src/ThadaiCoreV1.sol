@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+
 /**
  * @title ThadaiCoreV1
  * @notice Access control contract with a payment based approach and withdrawal cooldowns
@@ -8,11 +10,12 @@ pragma solidity ^0.8.19;
  *      Implements time-based access control with configurable pricing and withdrawal restrictions.
  * @author developer.thevimal98@gmail.com
  */
-contract ThadaiCoreV1 {
+contract ThadaiCoreV1 is ReentrancyGuard {
     // Errors
     error PaymentBelowMinimumAmount(uint256 minimumAmount);
     error NoBalanceToWithdraw();
     error WithdrawalCooldownActive(uint256 cooldownRemaining);
+    error WithdrawalTransferFailed(address user, uint256 amount);
 
     // Struct to store user access information
     struct UserAccess {
@@ -25,9 +28,6 @@ contract ThadaiCoreV1 {
     }
 
     // Contract configuration
-    /// @notice Owner of the contract with administrative privileges
-    address public owner;
-
     /// @notice Price for 1 second of access in wei
     uint256 public baseAccessPrice;
 
@@ -56,15 +56,9 @@ contract ThadaiCoreV1 {
     /// @param amount Amount of ETH withdrawn
     event UserWithdrawn(address indexed user, uint256 amount);
 
-    /// @notice Emitted when contract configuration is updated
-    /// @param newBasePrice New price per second of access
-    /// @param newRedemptionCooldown New withdrawal cooldown period
-    /// TODO: Remove this (and perform subsequent downstream ABI updations)
-    event ConfigurationUpdated(uint256 newBasePrice, uint256 newRedemptionCooldown);
-
     /**
      * @notice Initialize the contract with configuration parameters
-     * @dev Constructor sets initial configuration and assigns contract owner
+     * @dev Constructor sets initial values for access pricing, minimum payment, withdrawal cooldown, and inflation parameters
      * @param _baseAccessPrice Price for 1 second of access in wei
      * @param _minimumPaymentAmount Minimum payment required to purchase access
      * @param _withdrawCooldownInDays Days users must wait between withdrawals
@@ -78,7 +72,6 @@ contract ThadaiCoreV1 {
         uint256 _inflationWindowInHours,
         uint256 _inflationPercent
     ) {
-        owner = msg.sender;
         baseAccessPrice = _baseAccessPrice;
         minimumPaymentAmount = _minimumPaymentAmount;
         withdrawCooldownInDays = _withdrawCooldownInDays * 1 days;
@@ -96,30 +89,20 @@ contract ThadaiCoreV1 {
             revert PaymentBelowMinimumAmount(minimumPaymentAmount);
         }
         UserAccess storage access = userAccess[msg.sender];
-        // Calculate how many access seconds the payment can buy, considering inflation if applicable
-        uint256 unlockedAccessSeconds;
+        uint256 unlockedAccessSeconds =
+            calculateAccessFromPayment(msg.value, _getApplicableInflationPercent(access.lastPurchaseTime));
         uint256 currentTime = block.timestamp;
-        if (access.lastPurchaseTime != 0 && currentTime - access.lastPurchaseTime < inflationWindowInHours) {
-            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, inflationPercent);
-        } else {
-            unlockedAccessSeconds = calculateAccessFromPayment(msg.value, 0);
-        }
-        // Calculate new access expiration
         uint256 newAccessUntil;
         if (access.accessUntil > currentTime) {
-            // Extend existing access with all purchased seconds
             newAccessUntil = access.accessUntil + unlockedAccessSeconds;
         } else {
-            // Start new access period
             newAccessUntil = currentTime + unlockedAccessSeconds;
         }
-        // Update user access information
         access.balance += msg.value;
         access.accessUntil = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
         access.totalAccessSecondsPurchased += unlockedAccessSeconds;
-
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }
 
@@ -147,7 +130,7 @@ contract ThadaiCoreV1 {
      * @dev Allows user (msg.sender) to withdraw their entire balance if eligible. Enforces redemption cooldown
      *      to prevent frequent withdrawals. Resets user data after successful withdrawal.
      */
-    function withdrawFunds() external {
+    function withdrawFunds() external nonReentrant {
         UserAccess storage access = userAccess[msg.sender];
         if (access.balance == 0) {
             revert NoBalanceToWithdraw();
@@ -166,7 +149,10 @@ contract ThadaiCoreV1 {
         access.lastRedemptionTime = block.timestamp;
 
         // Transfer funds
-        payable(msg.sender).transfer(withdrawAmount);
+        (bool transferSuccess,) = payable(msg.sender).call{value: withdrawAmount}("");
+        if (!transferSuccess) {
+            revert WithdrawalTransferFailed(msg.sender, withdrawAmount);
+        }
 
         emit UserWithdrawn(msg.sender, withdrawAmount);
     }
@@ -203,11 +189,7 @@ contract ThadaiCoreV1 {
         UserAccess storage access = userAccess[_user];
         canWithdraw = _canUserWithdraw(access);
         cooldownRemaining = _getWithdrawalCooldownRemaining(access);
-        if (access.lastPurchaseTime != 0 && block.timestamp - access.lastPurchaseTime <= inflationWindowInHours) {
-            applicableInflationPercent = inflationPercent;
-        } else {
-            applicableInflationPercent = 0;
-        }
+        applicableInflationPercent = _getApplicableInflationPercent(access.lastPurchaseTime);
         return (
             access.balance,
             access.accessUntil,
@@ -230,8 +212,24 @@ contract ThadaiCoreV1 {
      * @return _inflationWindowInHours Hours within which inflation applies
      * @return _inflationPercent Percent increase in price during inflation window
      */
-    function getAccessPricingInfo() public view returns (uint256 _baseAccessPrice, uint256 _minimumPaymentAmount, uint256 _withdrawCooldownInDays, uint256 _inflationWindowInHours, uint256 _inflationPercent) {
-        return (baseAccessPrice, minimumPaymentAmount, withdrawCooldownInDays / 1 days, inflationWindowInHours / 1 hours, inflationPercent);
+    function getAccessPricingInfo()
+        public
+        view
+        returns (
+            uint256 _baseAccessPrice,
+            uint256 _minimumPaymentAmount,
+            uint256 _withdrawCooldownInDays,
+            uint256 _inflationWindowInHours,
+            uint256 _inflationPercent
+        )
+    {
+        return (
+            baseAccessPrice,
+            minimumPaymentAmount,
+            withdrawCooldownInDays / 1 days,
+            inflationWindowInHours / 1 hours,
+            inflationPercent
+        );
     }
 
     /**
@@ -278,6 +276,18 @@ contract ThadaiCoreV1 {
         } else {
             return withdrawCooldownInDays - timeSinceLastWithdrawal;
         }
+    }
+
+    /**
+     * @notice Internal function to determine applicable inflation percent based on last purchase time
+     * @param lastPurchaseTime Last time user purchased access
+     * @return percent Inflation percent to apply
+     */
+    function _getApplicableInflationPercent(uint256 lastPurchaseTime) internal view returns (uint256 percent) {
+        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowInHours) {
+            return inflationPercent;
+        }
+        return 0;
     }
 
     /**

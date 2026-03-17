@@ -12,6 +12,9 @@ import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/Reentrancy
  */
 contract ThadaiCoreV1 is ReentrancyGuard {
     // Errors
+    error InvalidBasePrice();
+    error InvalidMinimumPayment();
+
     error PaymentBelowMinimumAmount(uint256 minimumAmount);
     error NoBalanceToWithdraw();
     error WithdrawalCooldownActive(uint256 cooldownRemaining);
@@ -29,17 +32,17 @@ contract ThadaiCoreV1 is ReentrancyGuard {
 
     // Contract configuration
     /// @notice Price for 1 second of access in wei
-    uint256 public baseAccessPrice;
+    uint256 public immutable baseAccessPrice;
 
     /// @notice Minimum payment required to purchase access
-    uint256 public minimumPaymentAmount;
+    uint256 public immutable minimumPaymentAmount;
 
     /// @notice Time period users must wait between withdrawals
-    uint256 public withdrawCooldownInDays;
+    uint256 public immutable withdrawCooldownPeriod;
 
     /// @notice User inflation parameters for dynamic pricing
-    uint256 public inflationWindowInHours;
-    uint256 public inflationPercent;
+    uint256 public immutable inflationWindowPeriod;
+    uint16 public immutable inflationPercent;
 
     /// @notice Mapping from user address to their access information
     mapping(address => UserAccess) public userAccess;
@@ -68,14 +71,16 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     constructor(
         uint256 _baseAccessPrice,
         uint256 _minimumPaymentAmount,
-        uint256 _withdrawCooldownInDays,
-        uint256 _inflationWindowInHours,
-        uint256 _inflationPercent
+        uint16 _withdrawCooldownInDays,
+        uint16 _inflationWindowInHours,
+        uint16 _inflationPercent
     ) {
+        if (_baseAccessPrice == 0) revert InvalidBasePrice();
+        if (_minimumPaymentAmount == 0) revert InvalidMinimumPayment();
         baseAccessPrice = _baseAccessPrice;
         minimumPaymentAmount = _minimumPaymentAmount;
-        withdrawCooldownInDays = _withdrawCooldownInDays * 1 days;
-        inflationWindowInHours = _inflationWindowInHours * 1 hours;
+        withdrawCooldownPeriod = _withdrawCooldownInDays * 1 days;
+        inflationWindowPeriod = _inflationWindowInHours * 1 hours;
         inflationPercent = _inflationPercent;
     }
 
@@ -226,8 +231,8 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         return (
             baseAccessPrice,
             minimumPaymentAmount,
-            withdrawCooldownInDays / 1 days,
-            inflationWindowInHours / 1 hours,
+            withdrawCooldownPeriod / 1 days,
+            inflationWindowPeriod / 1 hours,
             inflationPercent
         );
     }
@@ -250,7 +255,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         }
         // Check if enough time has passed since last withdrawal
         uint256 timeSinceLastWithdrawal = block.timestamp - userAccessData.lastRedemptionTime;
-        return timeSinceLastWithdrawal >= withdrawCooldownInDays;
+        return timeSinceLastWithdrawal >= withdrawCooldownPeriod;
     }
 
     /**
@@ -271,10 +276,10 @@ contract ThadaiCoreV1 is ReentrancyGuard {
 
         uint256 timeSinceLastWithdrawal = block.timestamp - _userAccessData.lastRedemptionTime;
 
-        if (timeSinceLastWithdrawal >= withdrawCooldownInDays) {
+        if (timeSinceLastWithdrawal >= withdrawCooldownPeriod) {
             return 0;
         } else {
-            return withdrawCooldownInDays - timeSinceLastWithdrawal;
+            return withdrawCooldownPeriod - timeSinceLastWithdrawal;
         }
     }
 
@@ -284,7 +289,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
      * @return percent Inflation percent to apply
      */
     function _getApplicableInflationPercent(uint256 lastPurchaseTime) internal view returns (uint256 percent) {
-        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowInHours) {
+        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowPeriod) {
             return inflationPercent;
         }
         return 0;

@@ -27,18 +27,18 @@ contract DeployThadaiCoreV1 is Script {
     //   Using exact calculation: 2000000000000000000 / 3300 = 606060606060606 wei
     uint256 public constant MINIMUM_PAYMENT_AMOUNT_IN_WEI = 606060606060606;
 
-    uint8 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
+    uint16 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
 
-    uint256 public constant INFLATION_WINDOW_IN_HOURS = 1;
+    uint16 public constant INFLATION_WINDOW_IN_HOURS = 1;
 
-    uint8 public constant INFLATION_PERCENT_PER_WINDOW = 10;
+    uint16 public constant INFLATION_PERCENT_PER_WINDOW = 10;
 
     function deployThadaiCoreV1(
         uint256 base_access_price_in_wei,
         uint256 minimum_payment_amount_in_wei,
-        uint8 withdraw_cooldown_period_in_days,
-        uint256 inflation_window_in_hours,
-        uint8 inflation_percent_per_window
+        uint16 withdraw_cooldown_period_in_days,
+        uint16 inflation_window_in_hours,
+        uint16 inflation_percent_per_window
     ) public returns (ThadaiCoreV1) {
         vm.startBroadcast();
         ThadaiCoreV1 thadaiCoreV1 = new ThadaiCoreV1(

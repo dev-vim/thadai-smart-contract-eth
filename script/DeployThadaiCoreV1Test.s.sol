@@ -9,9 +9,9 @@ contract DeployThadaiCoreV1Test is Script {
     function run() external returns (ThadaiCoreV1) {
         uint256 base_access_price_in_wei = 20e10;
         uint256 minimum_payment_amount_in_wei = 24000e10;
-        uint8 withdraw_cooldown_period_in_days = 1;
-        uint256 inflation_window_in_hours = 1;
-        uint8 inflation_percent_per_window = 10;
+        uint16 withdraw_cooldown_period_in_days = 1;
+        uint16 inflation_window_in_hours = 1;
+        uint16 inflation_percent_per_window = 10;
         DeployThadaiCoreV1 deployer = new DeployThadaiCoreV1();
         return deployer.deployThadaiCoreV1(
             base_access_price_in_wei,

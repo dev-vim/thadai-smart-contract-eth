@@ -38,8 +38,8 @@ contract ThadaiCoreV1Test is Test {
         assertEq(thadaiCoreV1Test.minimumPaymentAmount(), MINIMUM_PAYMENT_AMOUNT);
     }
 
-    function test_Constructor_SetsWithdrawCooldownInDays() public view {
-        assertEq(thadaiCoreV1Test.withdrawCooldownInDays(), WITHDRAW_COOLDOWN_PERIOD);
+    function test_Constructor_SetsWithdrawCooldownPeriod() public view {
+        assertEq(thadaiCoreV1Test.withdrawCooldownPeriod(), WITHDRAW_COOLDOWN_PERIOD);
     }
 
     // ============ Purchase Access Tests ============
@@ -325,7 +325,7 @@ contract ThadaiCoreV1Test is Test {
         thadaiCoreV1Test.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
 
         // Move past cooldown
-        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownInDays());
+        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownPeriod());
 
         uint256 balanceBefore = user1.balance;
         vm.prank(user1);
@@ -385,7 +385,7 @@ contract ThadaiCoreV1Test is Test {
         vm.prank(user1);
         thadaiCoreV1Test.withdrawFunds();
 
-        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownInDays());
+        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownPeriod());
 
         vm.prank(user1);
         thadaiCoreV1Test.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT * 2}();
@@ -464,7 +464,7 @@ contract ThadaiCoreV1Test is Test {
 
         assertFalse(canWithdraw);
         assertGt(cooldownRemaining, 0);
-        assertLe(cooldownRemaining, thadaiCoreV1Test.withdrawCooldownInDays());
+        assertLe(cooldownRemaining, thadaiCoreV1Test.withdrawCooldownPeriod());
     }
 
     function test_GetUserAccessInfo_UserAfterCooldown() public {
@@ -475,7 +475,7 @@ contract ThadaiCoreV1Test is Test {
         vm.prank(user1);
         thadaiCoreV1Test.withdrawFunds();
 
-        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownInDays());
+        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownPeriod());
 
         vm.prank(user1);
         thadaiCoreV1Test.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
@@ -561,8 +561,8 @@ contract ThadaiCoreV1Test is Test {
             thadaiCoreV1Test.getAccessPricingInfo();
 
         assertEq(basePrice, thadaiCoreV1Test.baseAccessPrice());
-        assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, thadaiCoreV1Test.withdrawCooldownInDays());
-        assertEq(inflationWindowHours * INFLATION_WINDOW, thadaiCoreV1Test.inflationWindowInHours());
+        assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, thadaiCoreV1Test.withdrawCooldownPeriod());
+        assertEq(inflationWindowHours * INFLATION_WINDOW, thadaiCoreV1Test.inflationWindowPeriod());
         assertEq(inflationPercent, thadaiCoreV1Test.inflationPercent());
     }
 
@@ -628,7 +628,7 @@ contract ThadaiCoreV1Test is Test {
         thadaiCoreV1Test.withdrawFunds();
 
         // Wait for cooldown
-        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownInDays());
+        vm.warp(block.timestamp + thadaiCoreV1Test.withdrawCooldownPeriod());
 
         // Purchase 3
         vm.prank(user1);
@@ -667,7 +667,7 @@ contract ThadaiCoreV1Test is Test {
 
         // Check cooldown immediately after withdrawal
         (,,,,,,, uint256 cooldownRemaining,) = thadaiCoreV1Test.getUserAccessInfo(user1);
-        uint256 expectedCooldown = thadaiCoreV1Test.withdrawCooldownInDays();
+        uint256 expectedCooldown = thadaiCoreV1Test.withdrawCooldownPeriod();
         assertGt(cooldownRemaining, 0);
         assertLe(cooldownRemaining, expectedCooldown);
 

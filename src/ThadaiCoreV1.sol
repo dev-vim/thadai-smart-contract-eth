@@ -23,7 +23,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     // Struct to store user access information
     struct UserAccess {
         uint256 balance; // Total balance deposited by user
-        uint256 accessUntil; // Timestamp until which user has access
+        uint256 accessUntilTime; // Timestamp until which user has access
         uint256 lastPurchaseTime; // Last time user purchased access
         uint256 lastRedemptionTime; // Last time user redeemed/withdrew funds
         uint256 totalAccessSecondsPurchased; // Total access time purchased by user
@@ -51,8 +51,8 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     /// @notice Emitted when a user purchases access time
     /// @param user Address of the user who purchased access
     /// @param amount Amount of ETH paid for access
-    /// @param accessUntil Timestamp when access expires
-    event AccessPurchased(address indexed user, uint256 amount, uint256 accessUntil);
+    /// @param accessUntilTime Timestamp when access expires
+    event AccessPurchased(address indexed user, uint256 amount, uint256 accessUntilTime);
 
     /// @notice Emitted when a user withdraws their funds
     /// @param user Address of the user who withdrew
@@ -98,13 +98,13 @@ contract ThadaiCoreV1 is ReentrancyGuard {
             calculateAccessFromPayment(msg.value, _getApplicableInflationPercent(access.lastPurchaseTime));
         uint256 currentTime = block.timestamp;
         uint256 newAccessUntil;
-        if (access.accessUntil > currentTime) {
-            newAccessUntil = access.accessUntil + unlockedAccessSeconds;
+        if (access.accessUntilTime > currentTime) {
+            newAccessUntil = access.accessUntilTime + unlockedAccessSeconds;
         } else {
             newAccessUntil = currentTime + unlockedAccessSeconds;
         }
         access.balance += msg.value;
-        access.accessUntil = newAccessUntil;
+        access.accessUntilTime = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
         access.totalAccessSecondsPurchased += unlockedAccessSeconds;
@@ -121,9 +121,9 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     function checkAccess(address _user) public view returns (bool hasAccess, uint256 remainingSeconds) {
         UserAccess storage access = userAccess[_user];
         uint256 currentTime = block.timestamp;
-        if (access.accessUntil > currentTime) {
+        if (access.accessUntilTime > currentTime) {
             hasAccess = true;
-            remainingSeconds = access.accessUntil - currentTime;
+            remainingSeconds = access.accessUntilTime - currentTime;
         } else {
             hasAccess = false;
             remainingSeconds = 0;
@@ -150,7 +150,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
 
         // Reset user data and update redemption time
         access.balance = 0;
-        access.accessUntil = 0;
+        access.accessUntilTime = 0;
         access.lastRedemptionTime = block.timestamp;
 
         // Transfer funds
@@ -167,7 +167,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
      * @dev Returns all user access data including balance, access status, and withdrawal eligibility
      * @param _user Address of the user to query
      * @return balance User's current balance in contract
-     * @return accessUntil Timestamp when access expires
+     * @return accessUntilTime Timestamp when access expires
      * @return lastPurchaseTime Last time user purchased access
      * @return lastRedemptionTime Last time user withdrew funds (0 if never withdrawn)
      * @return totalAccessSecondsPurchased Total access time user has purchased historically
@@ -181,7 +181,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         view
         returns (
             uint256 balance,
-            uint256 accessUntil,
+            uint256 accessUntilTime,
             uint256 lastPurchaseTime,
             uint256 lastRedemptionTime,
             uint256 totalAccessSecondsPurchased,
@@ -197,7 +197,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         applicableInflationPercent = _getApplicableInflationPercent(access.lastPurchaseTime);
         return (
             access.balance,
-            access.accessUntil,
+            access.accessUntilTime,
             access.lastPurchaseTime,
             access.lastRedemptionTime,
             access.totalAccessSecondsPurchased,

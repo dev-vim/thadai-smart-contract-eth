@@ -3,7 +3,9 @@ pragma solidity ^0.8.19;
 
 import {Test} from "forge-std/Test.sol";
 import {ThadaiCore} from "../src/ThadaiCore.sol";
+import {IThadaiCore} from "../src/IThadaiCore.sol";
 import {DeployThadaiCoreTest} from "../script/DeployThadaiCoreTest.s.sol";
+import {ReentrancyAttacker} from "./ReentrancyAttacker.sol";
 
 contract ThadaiCoreTest is Test {
     ThadaiCore public thadaiCore;
@@ -102,7 +104,7 @@ contract ThadaiCoreTest is Test {
     function test_PurchaseAccess_RevertsWhenPaymentBelowMinimum() public {
         vm.deal(user1, MINIMUM_PAYMENT_AMOUNT - 1);
         vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(ThadaiCore.PaymentBelowMinimumAmount.selector, MINIMUM_PAYMENT_AMOUNT));
+        vm.expectRevert(abi.encodeWithSelector(IThadaiCore.PaymentBelowMinimumAmount.selector, MINIMUM_PAYMENT_AMOUNT));
         thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT - 1}();
     }
 
@@ -164,7 +166,7 @@ contract ThadaiCoreTest is Test {
 
         // Check that event is emitted with correct user and amount (ignore timestamp due to timing)
         vm.expectEmit(true, false, false, false);
-        emit ThadaiCore.AccessPurchased(user1, MINIMUM_PAYMENT_AMOUNT, 0);
+        emit IThadaiCore.AccessPurchased(user1, MINIMUM_PAYMENT_AMOUNT, 0);
 
         vm.prank(user1);
         thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
@@ -282,7 +284,7 @@ contract ThadaiCoreTest is Test {
 
     function test_WithdrawFunds_RevertsWhenNoBalance() public {
         vm.prank(user1);
-        vm.expectRevert(ThadaiCore.NoBalanceToWithdraw.selector);
+        vm.expectRevert(IThadaiCore.NoBalanceToWithdraw.selector);
         thadaiCore.withdrawFunds();
     }
 
@@ -305,7 +307,7 @@ contract ThadaiCoreTest is Test {
         vm.prank(user1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ThadaiCore.WithdrawalCooldownActive.selector, block.timestamp - firstWithdrawalTime
+                IThadaiCore.WithdrawalCooldownActive.selector, block.timestamp - firstWithdrawalTime
             )
         );
         thadaiCore.withdrawFunds();
@@ -354,7 +356,7 @@ contract ThadaiCoreTest is Test {
 
         vm.prank(user1);
         vm.expectEmit(true, false, false, false);
-        emit ThadaiCore.UserWithdrawn(user1, MINIMUM_PAYMENT_AMOUNT);
+        emit IThadaiCore.UserWithdrawn(user1, MINIMUM_PAYMENT_AMOUNT);
 
         thadaiCore.withdrawFunds();
     }
@@ -722,5 +724,147 @@ contract ThadaiCoreTest is Test {
 
         uint256 expectedSeconds = payment / BASE_ACCESS_PRICE;
         assertGe(accessUntil - block.timestamp, expectedSeconds - 10); // Allow small time variance
+    }
+
+    // ============ Reentrancy Attack Tests ============
+
+    function test_WithdrawFunds_RevertsOnReentrancy() public {
+        ReentrancyAttacker attacker = new ReentrancyAttacker(address(thadaiCore));
+        vm.deal(address(attacker), MINIMUM_PAYMENT_AMOUNT);
+
+        // Attacker purchases access, then withdrawFunds triggers receive() which re-enters
+        vm.expectRevert();
+        attacker.attack{value: MINIMUM_PAYMENT_AMOUNT}();
+    }
+
+    function test_WithdrawFunds_AttackerCannotDrainContract() public {
+        // Legitimate user deposits first
+        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+
+        // Attacker deposits and tries to re-enter
+        ReentrancyAttacker attacker = new ReentrancyAttacker(address(thadaiCore));
+        vm.deal(address(attacker), MINIMUM_PAYMENT_AMOUNT);
+
+        vm.expectRevert();
+        attacker.attack{value: MINIMUM_PAYMENT_AMOUNT}();
+
+        // Legitimate user's balance must be intact
+        assertEq(address(thadaiCore).balance, MINIMUM_PAYMENT_AMOUNT);
+        (uint256 balance,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
+        assertEq(balance, MINIMUM_PAYMENT_AMOUNT);
+    }
+
+    // ============ Constructor Validation Tests ============
+
+    function test_Constructor_RevertsOnZeroBasePrice() public {
+        vm.expectRevert(ThadaiCore.InvalidBasePrice.selector);
+        new ThadaiCore(0, MINIMUM_PAYMENT_AMOUNT, 1, 1, 10);
+    }
+
+    function test_Constructor_RevertsOnZeroMinimumPayment() public {
+        vm.expectRevert(ThadaiCore.InvalidMinimumPayment.selector);
+        new ThadaiCore(BASE_ACCESS_PRICE, 0, 1, 1, 10);
+    }
+
+    // ============ Direct ETH Transfer Tests ============
+
+    function test_RejectsDirectETHTransfer() public {
+        // Contract has no receive() or fallback(), so raw ETH transfers should revert
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        (bool success,) = address(thadaiCore).call{value: 1 ether}("");
+        assertFalse(success);
+    }
+
+    function test_RejectsDirectETHTransferWithData() public {
+        // Calling a non-existent function with value should also revert
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        (bool success,) = address(thadaiCore).call{value: 1 ether}(abi.encodeWithSignature("nonExistent()"));
+        assertFalse(success);
+    }
+
+    // ============ Inflation Edge Case Tests ============
+
+    function test_Inflation_ReducesAccessSecondsForSamePayment() public {
+        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
+        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, INFLATION_PERCENT_PER_WINDOW);
+
+        assertGt(normalSeconds, inflatedSeconds);
+
+        // Verify the inflation math: inflated price = base + base * 10 / 100 = 1.1x base
+        uint256 expectedInflatedSeconds = MINIMUM_PAYMENT_AMOUNT / (BASE_ACCESS_PRICE + (BASE_ACCESS_PRICE * INFLATION_PERCENT_PER_WINDOW) / 100);
+        assertEq(inflatedSeconds, expectedInflatedSeconds);
+    }
+
+    function test_Inflation_ResetsAfterWindowExpires() public {
+        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+
+        // First purchase
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+
+        // Inflation active immediately after purchase
+        (,,,,,,,, uint256 inflationRight) = thadaiCore.getUserAccessInfo(user1);
+        assertEq(inflationRight, INFLATION_PERCENT_PER_WINDOW);
+
+        // Advance past inflation window
+        vm.warp(block.timestamp + INFLATION_WINDOW);
+
+        // Inflation should be 0 now
+        (,,,,,,,, uint256 inflationAfter) = thadaiCore.getUserAccessInfo(user1);
+        assertEq(inflationAfter, 0);
+    }
+
+    function test_Inflation_SecondPurchaseWithinWindowGetsLessAccess() public {
+        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        vm.deal(user2, MINIMUM_PAYMENT_AMOUNT);
+
+        // user1 purchases twice rapidly (second purchase gets inflated price)
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        (,,,, uint64 firstPurchaseSeconds,,,,) = thadaiCore.getUserAccessInfo(user1);
+
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        (,,,, uint64 totalAfterSecond,,,,) = thadaiCore.getUserAccessInfo(user1);
+
+        uint64 secondPurchaseSeconds = totalAfterSecond - firstPurchaseSeconds;
+
+        // user2 purchases once (gets base price)
+        vm.prank(user2);
+        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        (,,,, uint64 user2Seconds,,,,) = thadaiCore.getUserAccessInfo(user2);
+
+        // user1's second purchase should yield fewer seconds than user2's first purchase
+        assertLt(secondPurchaseSeconds, user2Seconds);
+    }
+
+    // ============ Payment Rounding / Dust Tests ============
+
+    function test_PurchaseAccess_PaymentJustAboveMinimum() public {
+        // Payment that's minimumPaymentAmount + 1 wei — ensure no rounding issues
+        uint256 payment = MINIMUM_PAYMENT_AMOUNT + 1;
+        vm.deal(user1, payment);
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: payment}();
+
+        (uint256 balance,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
+        assertEq(balance, payment);
+    }
+
+    function test_CalculateAccess_PaymentBelowOneSecondWorth() public view {
+        // Payment less than one second's cost yields 0 seconds (integer division floors)
+        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(BASE_ACCESS_PRICE - 1, 0);
+        assertEq(accessSeconds, 0);
+    }
+
+    function test_Fuzz_InflationAlwaysReducesOrMaintainsAccess(uint256 inflationPct) public view {
+        inflationPct = bound(inflationPct, 0, 200);
+        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
+        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, inflationPct);
+        assertLe(inflatedSeconds, normalSeconds);
     }
 }

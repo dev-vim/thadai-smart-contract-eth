@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {IThadaiCore} from "./IThadaiCore.sol";
 
 /**
  * @title ThadaiCore
@@ -10,15 +11,10 @@ import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/Reentrancy
  *      This contract is intentionally ownerless and immutable. Configuration is set at deploy time.
  * @author developer.thevimal98@gmail.com
  */
-contract ThadaiCore is ReentrancyGuard {
+contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     // Errors
     error InvalidBasePrice();
     error InvalidMinimumPayment();
-
-    error PaymentBelowMinimumAmount(uint256 minimumAmount);
-    error NoBalanceToWithdraw();
-    error WithdrawalCooldownActive(uint64 cooldownRemaining);
-    error WithdrawalTransferFailed(address user, uint256 amount);
 
     // Struct to store user access information
     struct UserAccess {
@@ -46,18 +42,6 @@ contract ThadaiCore is ReentrancyGuard {
 
     /// @notice Mapping from user address to their access information
     mapping(address => UserAccess) public userAccess;
-
-    // Events for tracking important actions
-    /// @notice Emitted when a user purchases access time
-    /// @param user Address of the user who purchased access
-    /// @param amount Amount of ETH paid for access
-    /// @param accessUntilTime Timestamp when access expires
-    event AccessPurchased(address indexed user, uint256 amount, uint256 accessUntilTime);
-
-    /// @notice Emitted when a user withdraws their funds
-    /// @param user Address of the user who withdrew
-    /// @param amount Amount of ETH withdrawn
-    event UserWithdrawn(address indexed user, uint256 amount);
 
     /**
      * @notice Initialize the contract with configuration parameters

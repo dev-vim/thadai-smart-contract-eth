@@ -7,7 +7,7 @@ import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/Reentrancy
  * @title ThadaiCore
  * @notice Access control contract with a payment based approach and withdrawal cooldowns
  * @dev Users purchase access time with ETH and can withdraw their funds after a cooldown period.
- *      Implements time-based access control with configurable pricing and withdrawal restrictions.
+ *      This contract is intentionally ownerless and immutable. Configuration is set at deploy time.
  * @author developer.thevimal98@gmail.com
  */
 contract ThadaiCore is ReentrancyGuard {
@@ -17,7 +17,7 @@ contract ThadaiCore is ReentrancyGuard {
 
     error PaymentBelowMinimumAmount(uint256 minimumAmount);
     error NoBalanceToWithdraw();
-    error WithdrawalCooldownActive(uint256 cooldownRemaining);
+    error WithdrawalCooldownActive(uint64 cooldownRemaining);
     error WithdrawalTransferFailed(address user, uint256 amount);
 
     // Struct to store user access information
@@ -26,7 +26,7 @@ contract ThadaiCore is ReentrancyGuard {
         uint256 accessUntilTime; // Timestamp until which user has access
         uint256 lastPurchaseTime; // Last time user purchased access
         uint256 lastRedemptionTime; // Last time user redeemed/withdrew funds
-        uint256 totalAccessSecondsPurchased; // Total access time purchased by user
+        uint64 totalAccessSecondsPurchased; // Total access time purchased by user
         uint256 totalPaid; // Total amount paid by user
     }
 
@@ -107,7 +107,7 @@ contract ThadaiCore is ReentrancyGuard {
         access.accessUntilTime = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
-        access.totalAccessSecondsPurchased += unlockedAccessSeconds;
+        access.totalAccessSecondsPurchased += uint64(unlockedAccessSeconds);
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }
 
@@ -143,7 +143,7 @@ contract ThadaiCore is ReentrancyGuard {
 
         // User can only withdraw after redemption cooldown
         if (!_canUserWithdraw(access)) {
-            revert WithdrawalCooldownActive(block.timestamp - access.lastRedemptionTime);
+            revert WithdrawalCooldownActive(uint64(block.timestamp - access.lastRedemptionTime));
         }
 
         uint256 withdrawAmount = access.balance;
@@ -184,10 +184,10 @@ contract ThadaiCore is ReentrancyGuard {
             uint256 accessUntilTime,
             uint256 lastPurchaseTime,
             uint256 lastRedemptionTime,
-            uint256 totalAccessSecondsPurchased,
+            uint64 totalAccessSecondsPurchased,
             uint256 totalPaid,
             bool canWithdraw,
-            uint256 cooldownRemaining,
+            uint64 cooldownRemaining,
             uint256 applicableInflationPercent
         )
     {
@@ -268,7 +268,7 @@ contract ThadaiCore is ReentrancyGuard {
     function _getWithdrawalCooldownRemaining(UserAccess storage _userAccessData)
         internal
         view
-        returns (uint256 cooldownRemaining)
+        returns (uint64 cooldownRemaining)
     {
         if (_userAccessData.lastRedemptionTime == 0) {
             return 0;
@@ -279,7 +279,7 @@ contract ThadaiCore is ReentrancyGuard {
         if (timeSinceLastWithdrawal >= withdrawCooldownPeriod) {
             return 0;
         } else {
-            return withdrawCooldownPeriod - timeSinceLastWithdrawal;
+            return uint64(withdrawCooldownPeriod - timeSinceLastWithdrawal);
         }
     }
 

@@ -4,13 +4,13 @@ pragma solidity ^0.8.19;
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 /**
- * @title ThadaiCoreV1
+ * @title ThadaiCore
  * @notice Access control contract with a payment based approach and withdrawal cooldowns
  * @dev Users purchase access time with ETH and can withdraw their funds after a cooldown period.
  *      Implements time-based access control with configurable pricing and withdrawal restrictions.
  * @author developer.thevimal98@gmail.com
  */
-contract ThadaiCoreV1 is ReentrancyGuard {
+contract ThadaiCore is ReentrancyGuard {
     // Errors
     error InvalidBasePrice();
     error InvalidMinimumPayment();

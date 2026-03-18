@@ -2,9 +2,9 @@
    <img src="img/logo_transparent_bg_1000px.png" alt="Thadai Logo" height="300" />
 </p>
 
-# Deploying ThadaiCoreV1
+# Deploying ThadaiCore
 
-This guide will walk you through deploying the ThadaiCoreV1 contract to a local Anvil instance. To deploy to a testnet or mainnet, adjust the RPC URL and private key accordingly.
+This guide will walk you through deploying the ThadaiCore contract to a local Anvil instance. To deploy to a testnet or mainnet, adjust the RPC URL and private key accordingly.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ cd thadai-smart-contract
 Deploy the contract using Forge:
 
 ```bash
-forge script script/DeployThadaiCoreV1.s.sol:DeployThadaiCoreV1 \
+forge script script/DeployThadaiCore.s.sol:DeployThadaiCore \
   --rpc-url http://localhost:8545 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --broadcast
@@ -58,7 +58,7 @@ forge script script/DeployThadaiCoreV1.s.sol:DeployThadaiCoreV1 \
 
 ### Deployment Parameters
 
-The contract will be deployed with these constructor parameters (defined in `DeployThadaiCoreV1.s.sol`):
+The contract will be deployed with these constructor parameters (defined in `DeployThadaiCore.s.sol`):
 
 - **Base Access Price**
 - **Minimum Payment**
@@ -70,7 +70,7 @@ After deployment, you should see output like:
 
 ```
 == Logs ==
-  0: contract ThadaiCoreV1 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519
+  0: contract ThadaiCore 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519
 
 ## Setting up 1 EVM.
 
@@ -147,7 +147,7 @@ You can also create a simple bash script to deploy:
 RPC_URL="http://localhost:8545"
 PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-forge script script/DeployThadaiCoreV1.s.sol:DeployThadaiCoreV1 \
+forge script script/DeployThadaiCore.s.sol:DeployThadaiCore \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast

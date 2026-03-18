@@ -4,7 +4,7 @@
 
 # Thadai Smart Contract
 
-The **Thadai Smart Contract** (`ThadaiCoreV1`) is the decentralized access control engine powering the Thadai productivity ecosystem. It enables blockchain-based, time-limited access to restricted web resources, creating a financial incentive for users to stay focused and avoid distractions.
+The **Thadai Smart Contract** (`ThadaiCore`) is the decentralized access control engine powering the Thadai productivity ecosystem. It enables blockchain-based, time-limited access to restricted web resources, creating a financial incentive for users to stay focused and avoid distractions.
 
 ## Key Features
 

@@ -2,59 +2,46 @@
 pragma solidity ^0.8.19;
 
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {IThadaiCore} from "./IThadaiCore.sol";
 
 /**
- * @title ThadaiCoreV1
+ * @title ThadaiCore
  * @notice Access control contract with a payment based approach and withdrawal cooldowns
  * @dev Users purchase access time with ETH and can withdraw their funds after a cooldown period.
- *      Implements time-based access control with configurable pricing and withdrawal restrictions.
+ *      This contract is intentionally ownerless and immutable. Configuration is set at deploy time.
  * @author developer.thevimal98@gmail.com
  */
-contract ThadaiCoreV1 is ReentrancyGuard {
+contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     // Errors
-    error PaymentBelowMinimumAmount(uint256 minimumAmount);
-    error NoBalanceToWithdraw();
-    error WithdrawalCooldownActive(uint256 cooldownRemaining);
-    error WithdrawalTransferFailed(address user, uint256 amount);
+    error InvalidBasePrice();
+    error InvalidMinimumPayment();
 
     // Struct to store user access information
     struct UserAccess {
         uint256 balance; // Total balance deposited by user
-        uint256 accessUntil; // Timestamp until which user has access
+        uint256 accessUntilTime; // Timestamp until which user has access
         uint256 lastPurchaseTime; // Last time user purchased access
         uint256 lastRedemptionTime; // Last time user redeemed/withdrew funds
-        uint256 totalAccessSecondsPurchased; // Total access time purchased by user
+        uint64 totalAccessSecondsPurchased; // Total access time purchased by user
         uint256 totalPaid; // Total amount paid by user
     }
 
     // Contract configuration
     /// @notice Price for 1 second of access in wei
-    uint256 public baseAccessPrice;
+    uint256 public immutable baseAccessPrice;
 
     /// @notice Minimum payment required to purchase access
-    uint256 public minimumPaymentAmount;
+    uint256 public immutable minimumPaymentAmount;
 
     /// @notice Time period users must wait between withdrawals
-    uint256 public withdrawCooldownInDays;
+    uint256 public immutable withdrawCooldownPeriod;
 
     /// @notice User inflation parameters for dynamic pricing
-    uint256 public inflationWindowInHours;
-    uint256 public inflationPercent;
+    uint256 public immutable inflationWindowPeriod;
+    uint16 public immutable inflationPercent;
 
     /// @notice Mapping from user address to their access information
     mapping(address => UserAccess) public userAccess;
-
-    // Events for tracking important actions
-    /// @notice Emitted when a user purchases access time
-    /// @param user Address of the user who purchased access
-    /// @param amount Amount of ETH paid for access
-    /// @param accessUntil Timestamp when access expires
-    event AccessPurchased(address indexed user, uint256 amount, uint256 accessUntil);
-
-    /// @notice Emitted when a user withdraws their funds
-    /// @param user Address of the user who withdrew
-    /// @param amount Amount of ETH withdrawn
-    event UserWithdrawn(address indexed user, uint256 amount);
 
     /**
      * @notice Initialize the contract with configuration parameters
@@ -68,14 +55,16 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     constructor(
         uint256 _baseAccessPrice,
         uint256 _minimumPaymentAmount,
-        uint256 _withdrawCooldownInDays,
-        uint256 _inflationWindowInHours,
-        uint256 _inflationPercent
+        uint16 _withdrawCooldownInDays,
+        uint16 _inflationWindowInHours,
+        uint16 _inflationPercent
     ) {
+        if (_baseAccessPrice == 0) revert InvalidBasePrice();
+        if (_minimumPaymentAmount == 0) revert InvalidMinimumPayment();
         baseAccessPrice = _baseAccessPrice;
         minimumPaymentAmount = _minimumPaymentAmount;
-        withdrawCooldownInDays = _withdrawCooldownInDays * 1 days;
-        inflationWindowInHours = _inflationWindowInHours * 1 hours;
+        withdrawCooldownPeriod = _withdrawCooldownInDays * 1 days;
+        inflationWindowPeriod = _inflationWindowInHours * 1 hours;
         inflationPercent = _inflationPercent;
     }
 
@@ -93,16 +82,17 @@ contract ThadaiCoreV1 is ReentrancyGuard {
             calculateAccessFromPayment(msg.value, _getApplicableInflationPercent(access.lastPurchaseTime));
         uint256 currentTime = block.timestamp;
         uint256 newAccessUntil;
-        if (access.accessUntil > currentTime) {
-            newAccessUntil = access.accessUntil + unlockedAccessSeconds;
+        if (access.accessUntilTime > currentTime) {
+            newAccessUntil = access.accessUntilTime + unlockedAccessSeconds;
         } else {
             newAccessUntil = currentTime + unlockedAccessSeconds;
         }
         access.balance += msg.value;
-        access.accessUntil = newAccessUntil;
+        access.accessUntilTime = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
-        access.totalAccessSecondsPurchased += unlockedAccessSeconds;
+        // Unlikely that a user would purchase more than ~584,000 years of access, so uint64 is sufficient for total seconds purchased
+        access.totalAccessSecondsPurchased += uint64(unlockedAccessSeconds);
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }
 
@@ -116,9 +106,9 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     function checkAccess(address _user) public view returns (bool hasAccess, uint256 remainingSeconds) {
         UserAccess storage access = userAccess[_user];
         uint256 currentTime = block.timestamp;
-        if (access.accessUntil > currentTime) {
+        if (access.accessUntilTime > currentTime) {
             hasAccess = true;
-            remainingSeconds = access.accessUntil - currentTime;
+            remainingSeconds = access.accessUntilTime - currentTime;
         } else {
             hasAccess = false;
             remainingSeconds = 0;
@@ -138,14 +128,14 @@ contract ThadaiCoreV1 is ReentrancyGuard {
 
         // User can only withdraw after redemption cooldown
         if (!_canUserWithdraw(access)) {
-            revert WithdrawalCooldownActive(block.timestamp - access.lastRedemptionTime);
+            revert WithdrawalCooldownActive(uint64(block.timestamp - access.lastRedemptionTime));
         }
 
         uint256 withdrawAmount = access.balance;
 
         // Reset user data and update redemption time
         access.balance = 0;
-        access.accessUntil = 0;
+        access.accessUntilTime = 0;
         access.lastRedemptionTime = block.timestamp;
 
         // Transfer funds
@@ -162,7 +152,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
      * @dev Returns all user access data including balance, access status, and withdrawal eligibility
      * @param _user Address of the user to query
      * @return balance User's current balance in contract
-     * @return accessUntil Timestamp when access expires
+     * @return accessUntilTime Timestamp when access expires
      * @return lastPurchaseTime Last time user purchased access
      * @return lastRedemptionTime Last time user withdrew funds (0 if never withdrawn)
      * @return totalAccessSecondsPurchased Total access time user has purchased historically
@@ -176,13 +166,13 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         view
         returns (
             uint256 balance,
-            uint256 accessUntil,
+            uint256 accessUntilTime,
             uint256 lastPurchaseTime,
             uint256 lastRedemptionTime,
-            uint256 totalAccessSecondsPurchased,
+            uint64 totalAccessSecondsPurchased,
             uint256 totalPaid,
             bool canWithdraw,
-            uint256 cooldownRemaining,
+            uint64 cooldownRemaining,
             uint256 applicableInflationPercent
         )
     {
@@ -192,7 +182,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         applicableInflationPercent = _getApplicableInflationPercent(access.lastPurchaseTime);
         return (
             access.balance,
-            access.accessUntil,
+            access.accessUntilTime,
             access.lastPurchaseTime,
             access.lastRedemptionTime,
             access.totalAccessSecondsPurchased,
@@ -226,8 +216,8 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         return (
             baseAccessPrice,
             minimumPaymentAmount,
-            withdrawCooldownInDays / 1 days,
-            inflationWindowInHours / 1 hours,
+            withdrawCooldownPeriod / 1 days,
+            inflationWindowPeriod / 1 hours,
             inflationPercent
         );
     }
@@ -250,7 +240,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
         }
         // Check if enough time has passed since last withdrawal
         uint256 timeSinceLastWithdrawal = block.timestamp - userAccessData.lastRedemptionTime;
-        return timeSinceLastWithdrawal >= withdrawCooldownInDays;
+        return timeSinceLastWithdrawal >= withdrawCooldownPeriod;
     }
 
     /**
@@ -263,7 +253,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
     function _getWithdrawalCooldownRemaining(UserAccess storage _userAccessData)
         internal
         view
-        returns (uint256 cooldownRemaining)
+        returns (uint64 cooldownRemaining)
     {
         if (_userAccessData.lastRedemptionTime == 0) {
             return 0;
@@ -271,10 +261,10 @@ contract ThadaiCoreV1 is ReentrancyGuard {
 
         uint256 timeSinceLastWithdrawal = block.timestamp - _userAccessData.lastRedemptionTime;
 
-        if (timeSinceLastWithdrawal >= withdrawCooldownInDays) {
+        if (timeSinceLastWithdrawal >= withdrawCooldownPeriod) {
             return 0;
         } else {
-            return withdrawCooldownInDays - timeSinceLastWithdrawal;
+            return uint64(withdrawCooldownPeriod - timeSinceLastWithdrawal);
         }
     }
 
@@ -284,7 +274,7 @@ contract ThadaiCoreV1 is ReentrancyGuard {
      * @return percent Inflation percent to apply
      */
     function _getApplicableInflationPercent(uint256 lastPurchaseTime) internal view returns (uint256 percent) {
-        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowInHours) {
+        if (lastPurchaseTime != 0 && block.timestamp - lastPurchaseTime < inflationWindowPeriod) {
             return inflationPercent;
         }
         return 0;

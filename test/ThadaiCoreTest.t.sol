@@ -23,7 +23,6 @@ contract ThadaiCoreTest is Test {
 
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
-    address public user3 = makeAddr("user3");
 
     function setUp() external {
         DeployThadaiCoreTest deployer = new DeployThadaiCoreTest();
@@ -306,9 +305,7 @@ contract ThadaiCoreTest is Test {
         // Try to withdraw before cooldown
         vm.prank(user1);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IThadaiCore.WithdrawalCooldownActive.selector, block.timestamp - firstWithdrawalTime
-            )
+            abi.encodeWithSelector(IThadaiCore.WithdrawalCooldownActive.selector, block.timestamp - firstWithdrawalTime)
         );
         thadaiCore.withdrawFunds();
     }
@@ -788,14 +785,16 @@ contract ThadaiCoreTest is Test {
 
     // ============ Inflation Edge Case Tests ============
 
-    function test_Inflation_ReducesAccessSecondsForSamePayment() public {
+    function test_Inflation_ReducesAccessSecondsForSamePayment() public view {
         uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
-        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, INFLATION_PERCENT_PER_WINDOW);
+        uint256 inflatedSeconds =
+            thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, INFLATION_PERCENT_PER_WINDOW);
 
         assertGt(normalSeconds, inflatedSeconds);
 
         // Verify the inflation math: inflated price = base + base * 10 / 100 = 1.1x base
-        uint256 expectedInflatedSeconds = MINIMUM_PAYMENT_AMOUNT / (BASE_ACCESS_PRICE + (BASE_ACCESS_PRICE * INFLATION_PERCENT_PER_WINDOW) / 100);
+        uint256 expectedInflatedSeconds =
+            MINIMUM_PAYMENT_AMOUNT / (BASE_ACCESS_PRICE + (BASE_ACCESS_PRICE * INFLATION_PERCENT_PER_WINDOW) / 100);
         assertEq(inflatedSeconds, expectedInflatedSeconds);
     }
 

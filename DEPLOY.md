@@ -94,18 +94,10 @@ The contract address will be displayed (e.g., `0x5b73C5498c1E3b4dbA84de0F1833c4a
 You can verify the contract was deployed by calling a view function:
 
 ```bash
-cast call 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519 "owner()" --rpc-url http://localhost:8545
+cast call <CONTRACT_ADDRESS> "getContractBalance()" --rpc-url http://localhost:8545
 ```
 
-This should return the owner address (the deployer address: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`).
-
-### Check Contract Balance
-
-```bash
-cast call 0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519 "getContractBalance()" --rpc-url http://localhost:8545
-```
-
-Should return `0x0000000000000000000000000000000000000000000000000000000000000000` (zero balance initially).
+This should return `0x0000000000000000000000000000000000000000000000000000000000000000` (zero balance initially).
 
 ## Step 4: Update Extension Configuration
 

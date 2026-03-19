@@ -91,6 +91,7 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
         access.accessUntilTime = newAccessUntil;
         access.totalPaid += msg.value;
         access.lastPurchaseTime = currentTime;
+        // Unlikely that a user would purchase more than ~584,000 years of access, so uint64 is sufficient for total seconds purchased
         access.totalAccessSecondsPurchased += uint64(unlockedAccessSeconds);
         emit AccessPurchased(msg.sender, msg.value, newAccessUntil);
     }

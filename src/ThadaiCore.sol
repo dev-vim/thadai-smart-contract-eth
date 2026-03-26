@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {IThadaiCore} from "./IThadaiCore.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title ThadaiCore
@@ -15,6 +16,10 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     // Errors
     error InvalidBasePrice();
     error InvalidMinimumPayment();
+    error InvalidPriceFeedAddress();
+    error InvalidStalePriceThreshold();
+    error StalePriceFeed();
+    error InvalidOraclePrice();
 
     // Struct to store user access information
     struct UserAccess {
@@ -27,11 +32,17 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     }
 
     // Contract configuration
-    /// @notice Price for 1 second of access in wei
-    uint256 public immutable baseAccessPrice;
+    /// @notice Price for 1 second of access in USD (8-decimal scale, matching Chainlink)
+    uint256 public immutable baseAccessPriceUSD;
 
-    /// @notice Minimum payment required to purchase access
-    uint256 public immutable minimumPaymentAmount;
+    /// @notice Minimum payment required in USD (8-decimal scale, matching Chainlink)
+    uint256 public immutable minimumPaymentUSD;
+
+    /// @notice Chainlink ETH/USD price feed
+    AggregatorV3Interface public immutable priceFeed;
+
+    /// @notice Maximum age (in seconds) before the price feed is considered stale
+    uint256 public immutable stalePriceThreshold;
 
     /// @notice Time period users must wait between withdrawals
     uint256 public immutable withdrawCooldownPeriod;
@@ -46,23 +57,31 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     /**
      * @notice Initialize the contract with configuration parameters
      * @dev Constructor sets initial values for access pricing, minimum payment, withdrawal cooldown, and inflation parameters
-     * @param _baseAccessPrice Price for 1 second of access in wei
-     * @param _minimumPaymentAmount Minimum payment required to purchase access
+     * @param _baseAccessPriceUSD Price for 1 second of access in USD (8-decimal scale)
+     * @param _minimumPaymentUSD Minimum payment required in USD (8-decimal scale)
+     * @param _priceFeed Address of the Chainlink ETH/USD price feed
+     * @param _stalePriceThreshold Maximum age (in seconds) before the price feed is considered stale
      * @param _withdrawCooldownInDays Days users must wait between withdrawals
      * @param _inflationWindowInHours Hours within which inflation applies
      * @param _inflationPercent Percent increase in price during inflation window
      */
     constructor(
-        uint256 _baseAccessPrice,
-        uint256 _minimumPaymentAmount,
+        uint256 _baseAccessPriceUSD,
+        uint256 _minimumPaymentUSD,
+        address _priceFeed,
+        uint256 _stalePriceThreshold,
         uint16 _withdrawCooldownInDays,
         uint16 _inflationWindowInHours,
         uint16 _inflationPercent
     ) {
-        if (_baseAccessPrice == 0) revert InvalidBasePrice();
-        if (_minimumPaymentAmount == 0) revert InvalidMinimumPayment();
-        baseAccessPrice = _baseAccessPrice;
-        minimumPaymentAmount = _minimumPaymentAmount;
+        if (_baseAccessPriceUSD == 0) revert InvalidBasePrice();
+        if (_minimumPaymentUSD == 0) revert InvalidMinimumPayment();
+        if (_priceFeed == address(0)) revert InvalidPriceFeedAddress();
+        if (_stalePriceThreshold == 0) revert InvalidStalePriceThreshold();
+        baseAccessPriceUSD = _baseAccessPriceUSD;
+        minimumPaymentUSD = _minimumPaymentUSD;
+        priceFeed = AggregatorV3Interface(_priceFeed);
+        stalePriceThreshold = _stalePriceThreshold;
         withdrawCooldownPeriod = _withdrawCooldownInDays * 1 days;
         inflationWindowPeriod = _inflationWindowInHours * 1 hours;
         inflationPercent = _inflationPercent;
@@ -74,8 +93,9 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
      *      is calculated based on the payment amount. Existing access is extended if still active.
      */
     function purchaseAccess() external payable {
-        if (msg.value < minimumPaymentAmount) {
-            revert PaymentBelowMinimumAmount(minimumPaymentAmount);
+        uint256 currentMinimumPayment = _getMinimumPaymentWei();
+        if (msg.value < currentMinimumPayment) {
+            revert PaymentBelowMinimumAmount(currentMinimumPayment);
         }
         UserAccess storage access = userAccess[msg.sender];
         uint256 unlockedAccessSeconds =
@@ -196,8 +216,10 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     /**
      * @notice Get current pricing and cooldown configuration
      * @dev Returns the base access price, minimum payment, withdrawal cooldown, inflation window, and inflation percent
-     * @return _baseAccessPrice Price for 1 second of access in wei
-     * @return _minimumPaymentAmount Minimum payment required to purchase access
+     * @return _baseAccessPriceWei Current price for 1 second of access in wei (derived from oracle)
+     * @return _minimumPaymentWei Current minimum payment in wei (derived from oracle)
+     * @return _baseAccessPriceUSD Price for 1 second of access in USD (8-decimal scale)
+     * @return _minimumPaymentUSD Minimum payment in USD (8-decimal scale)
      * @return _withdrawCooldownInDays Days users must wait between withdrawals
      * @return _inflationWindowInHours Hours within which inflation applies
      * @return _inflationPercent Percent increase in price during inflation window
@@ -206,16 +228,20 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
         public
         view
         returns (
-            uint256 _baseAccessPrice,
-            uint256 _minimumPaymentAmount,
+            uint256 _baseAccessPriceWei,
+            uint256 _minimumPaymentWei,
+            uint256 _baseAccessPriceUSD,
+            uint256 _minimumPaymentUSD,
             uint256 _withdrawCooldownInDays,
             uint256 _inflationWindowInHours,
             uint256 _inflationPercent
         )
     {
         return (
-            baseAccessPrice,
-            minimumPaymentAmount,
+            _getBaseAccessPriceWei(),
+            _getMinimumPaymentWei(),
+            baseAccessPriceUSD,
+            minimumPaymentUSD,
             withdrawCooldownPeriod / 1 days,
             inflationWindowPeriod / 1 hours,
             inflationPercent
@@ -282,7 +308,7 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
 
     /**
      * @notice Calculate how many seconds of access a payment amount would provide
-     * @dev Public view function to calculate access time from payment amount using base price
+     * @dev Public view function to calculate access time from payment amount using live oracle price
      * @param _payment Amount in wei to calculate access for
      * @param _applicableInflationPercent Inflation percent to apply to base price
      * @return accessSeconds Number of seconds of access the payment would provide
@@ -292,8 +318,37 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
         view
         returns (uint256 accessSeconds)
     {
-        uint256 adjustedPrice = baseAccessPrice + ((baseAccessPrice * _applicableInflationPercent) / 100);
+        uint256 currentBasePrice = _getBaseAccessPriceWei();
+        uint256 adjustedPrice = currentBasePrice + ((currentBasePrice * _applicableInflationPercent) / 100);
         accessSeconds = _payment / adjustedPrice;
+    }
+
+    /**
+     * @notice Get the latest ETH/USD price from the Chainlink feed
+     * @dev Validates that the price is positive and not stale
+     * @return price ETH price in USD with 8 decimals
+     */
+    function _getLatestEthPriceUSD() internal view returns (uint256 price) {
+        (, int256 answer,, uint256 updatedAt,) = priceFeed.latestRoundData();
+        if (answer <= 0) revert InvalidOraclePrice();
+        if (block.timestamp - updatedAt > stalePriceThreshold) revert StalePriceFeed();
+        return uint256(answer);
+    }
+
+    /**
+     * @notice Derive the current base access price in wei from the USD price and oracle
+     * @return weiPrice Price per second of access in wei
+     */
+    function _getBaseAccessPriceWei() internal view returns (uint256 weiPrice) {
+        weiPrice = (baseAccessPriceUSD * 1e18) / _getLatestEthPriceUSD();
+    }
+
+    /**
+     * @notice Derive the current minimum payment in wei from the USD price and oracle
+     * @return weiMin Minimum payment in wei
+     */
+    function _getMinimumPaymentWei() internal view returns (uint256 weiMin) {
+        weiMin = (minimumPaymentUSD * 1e18) / _getLatestEthPriceUSD();
     }
 
     /**

@@ -604,8 +604,15 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_GetAccessPricingInfo_ValuesAreConsistentWithState() public view {
-        (uint256 basePriceWei,, uint256 basePriceUSD,, uint256 cooldownDays, uint256 inflationWindowHours, uint256 inflationPercent) =
-            thadaiCore.getAccessPricingInfo();
+        (
+            uint256 basePriceWei,
+            ,
+            uint256 basePriceUSD,
+            ,
+            uint256 cooldownDays,
+            uint256 inflationWindowHours,
+            uint256 inflationPercent
+        ) = thadaiCore.getAccessPricingInfo();
 
         assertEq(basePriceUSD, thadaiCore.baseAccessPriceUSD());
         assertGt(basePriceWei, 0);
@@ -854,14 +861,12 @@ contract ThadaiCoreTest is Test {
         uint256 minPayment = _minimumPaymentWei();
         uint256 basePrice = _baseAccessPriceWei();
         uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(minPayment, 0);
-        uint256 inflatedSeconds =
-            thadaiCore.calculateAccessFromPayment(minPayment, INFLATION_PERCENT_PER_WINDOW);
+        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(minPayment, INFLATION_PERCENT_PER_WINDOW);
 
         assertGt(normalSeconds, inflatedSeconds);
 
         // Verify the inflation math: inflated price = base + base * 10 / 100 = 1.1x base
-        uint256 expectedInflatedSeconds =
-            minPayment / (basePrice + (basePrice * INFLATION_PERCENT_PER_WINDOW) / 100);
+        uint256 expectedInflatedSeconds = minPayment / (basePrice + (basePrice * INFLATION_PERCENT_PER_WINDOW) / 100);
         assertEq(inflatedSeconds, expectedInflatedSeconds);
     }
 

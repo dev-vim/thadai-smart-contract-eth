@@ -5,27 +5,19 @@ import {Script} from "forge-std/Script.sol";
 import {ThadaiCore} from "../src/ThadaiCore.sol";
 
 contract DeployThadaiCore is Script {
-    // Pricing calculations:
+    // Pricing in USD (8-decimal scale, matching Chainlink ETH/USD feed)
     // - Target: $5 for 1 hour of usage
     // - 1 hour = 3,600 seconds
-    // - Price per second = $5 / 3,600 = $0.001388888... per second
-    // - 1 ETH = $2,200
-    // - 1 wei = $2,200 / 1e18 = $2.2e-15
-    // - Base access price (per second) = ($5 / 3,600) / ($2,200 / 1e18)
-    //   = (5 * 1e18) / (3,600 * 2,200)
-    //   = 5e18 / 7,920,000
-    //   = 631,313,131,313 wei (approximately 631313e9 wei)
-    //   Using exact calculation: 5000000000000000000 / 7920000 = 631313131313 wei
-    uint256 public constant BASE_ACCESS_PRICE_IN_WEI = 631313131313;
+    // - Price per second = $5 / 3,600 = $0.001388...
+    // - In 8-decimal scale: 0.001388... * 1e8 = 138_888 (~1.389e5)
+    uint256 public constant BASE_ACCESS_PRICE_USD = 138888; // $0.00138888/sec (8-dec)
 
-    // Minimum payment calculation:
     // - Target: $2 minimum payment
-    // - Minimum payment in ETH = $2 / $2,200 = 2 / 2,200 ETH
-    // - Minimum payment in wei = (2 * 1e18) / 2,200
-    //   = 2e18 / 2,200
-    //   = 909,090,909,090,909 wei (approximately 909091e9 wei)
-    //   Using exact calculation: 2000000000000000000 / 2200 = 909090909090909 wei
-    uint256 public constant MINIMUM_PAYMENT_AMOUNT_IN_WEI = 909090909090909;
+    // - In 8-decimal scale: 2 * 1e8 = 200_000_000
+    uint256 public constant MINIMUM_PAYMENT_USD = 200000000; // $2.00 (8-dec)
+
+    // Chainlink ETH/USD feed address (Sepolia by default)
+    address public constant PRICE_FEED_ADDRESS = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
 
     uint16 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
 
@@ -34,16 +26,18 @@ contract DeployThadaiCore is Script {
     uint16 public constant INFLATION_PERCENT_PER_WINDOW = 10;
 
     function deployThadaiCore(
-        uint256 base_access_price_in_wei,
-        uint256 minimum_payment_amount_in_wei,
+        uint256 base_access_price_usd,
+        uint256 minimum_payment_usd,
+        address price_feed,
         uint16 withdraw_cooldown_period_in_days,
         uint16 inflation_window_in_hours,
         uint16 inflation_percent_per_window
     ) public returns (ThadaiCore) {
         vm.startBroadcast();
         ThadaiCore thadaiCore = new ThadaiCore(
-            base_access_price_in_wei,
-            minimum_payment_amount_in_wei,
+            base_access_price_usd,
+            minimum_payment_usd,
+            price_feed,
             withdraw_cooldown_period_in_days,
             inflation_window_in_hours,
             inflation_percent_per_window
@@ -54,8 +48,9 @@ contract DeployThadaiCore is Script {
 
     function run() external returns (ThadaiCore) {
         return deployThadaiCore(
-            BASE_ACCESS_PRICE_IN_WEI,
-            MINIMUM_PAYMENT_AMOUNT_IN_WEI,
+            BASE_ACCESS_PRICE_USD,
+            MINIMUM_PAYMENT_USD,
+            PRICE_FEED_ADDRESS,
             WITHDRAW_COOLDOWN_PERIOD_IN_DAYS,
             INFLATION_WINDOW_IN_HOURS,
             INFLATION_PERCENT_PER_WINDOW

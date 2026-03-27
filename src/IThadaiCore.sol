@@ -50,8 +50,10 @@ interface IThadaiCore {
         external
         view
         returns (
-            uint256 _baseAccessPrice,
-            uint256 _minimumPaymentAmount,
+            uint256 _baseAccessPriceWei,
+            uint256 _minimumPaymentWei,
+            uint256 _baseAccessPriceUSD,
+            uint256 _minimumPaymentUSD,
             uint256 _withdrawCooldownInDays,
             uint256 _inflationWindowInHours,
             uint256 _inflationPercent

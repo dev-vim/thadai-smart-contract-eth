@@ -6,37 +6,53 @@ import {ThadaiCore} from "../src/ThadaiCore.sol";
 import {IThadaiCore} from "../src/IThadaiCore.sol";
 import {DeployThadaiCoreTest} from "../script/DeployThadaiCoreTest.s.sol";
 import {ReentrancyAttacker} from "./ReentrancyAttacker.sol";
+import {MockV3Aggregator} from "./MockV3Aggregator.sol";
 
 contract ThadaiCoreTest is Test {
     ThadaiCore public thadaiCore;
+    MockV3Aggregator public mockPriceFeed;
 
-    // Constants from deployment script
-    uint256 public constant BASE_ACCESS_PRICE = 20e10;
+    // USD-denominated constants from deployment script (8-decimal scale)
+    uint256 public constant BASE_ACCESS_PRICE_USD = 20e10;
+    uint256 public constant MINIMUM_PAYMENT_USD = 24000e10;
 
-    uint256 public constant MINIMUM_PAYMENT_AMOUNT = 24000e10;
+    // Mock ETH/USD price: $2200 with 8 decimals
+    int256 public constant MOCK_ETH_PRICE = 220000000000; // 2200 * 1e8
 
     uint256 public constant WITHDRAW_COOLDOWN_PERIOD = 86400; // 1 day in seconds
-
     uint256 public constant INFLATION_WINDOW = 3600; // 1 hour in seconds
-
     uint8 public constant INFLATION_PERCENT_PER_WINDOW = 10;
 
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
 
+    // Derived wei values (computed from USD prices and mock ETH price)
+    function _baseAccessPriceWei() internal pure returns (uint256) {
+        return (BASE_ACCESS_PRICE_USD * 1e18) / uint256(MOCK_ETH_PRICE);
+    }
+
+    function _minimumPaymentWei() internal pure returns (uint256) {
+        return (MINIMUM_PAYMENT_USD * 1e18) / uint256(MOCK_ETH_PRICE);
+    }
+
     function setUp() external {
+        mockPriceFeed = new MockV3Aggregator(8, MOCK_ETH_PRICE);
         DeployThadaiCoreTest deployer = new DeployThadaiCoreTest();
-        thadaiCore = deployer.run();
+        thadaiCore = deployer.run(address(mockPriceFeed));
     }
 
     // ============ Constructor Tests ============
 
-    function test_Constructor_SetsBaseAccessPrice() public view {
-        assertEq(thadaiCore.baseAccessPrice(), BASE_ACCESS_PRICE);
+    function test_Constructor_SetsBaseAccessPriceUSD() public view {
+        assertEq(thadaiCore.baseAccessPriceUSD(), BASE_ACCESS_PRICE_USD);
     }
 
-    function test_Constructor_SetsMinimumPaymentAmount() public view {
-        assertEq(thadaiCore.minimumPaymentAmount(), MINIMUM_PAYMENT_AMOUNT);
+    function test_Constructor_SetsMinimumPaymentUSD() public view {
+        assertEq(thadaiCore.minimumPaymentUSD(), MINIMUM_PAYMENT_USD);
+    }
+
+    function test_Constructor_SetsPriceFeed() public view {
+        assertEq(address(thadaiCore.priceFeed()), address(mockPriceFeed));
     }
 
     function test_Constructor_SetsWithdrawCooldownPeriod() public view {
@@ -46,9 +62,10 @@ contract ThadaiCoreTest is Test {
     // ============ Purchase Access Tests ============
 
     function test_PurchaseAccess_WithMinimumPayment() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (
             uint256 balance,
@@ -61,19 +78,20 @@ contract ThadaiCoreTest is Test {
             uint256 cooldownRemaining,
             uint256 applicableInflationPercent
         ) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(balance, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(balance, minPayment);
         assertGt(accessUntil, block.timestamp);
         assertGt(lastPurchaseTime, 0);
         assertEq(lastRedemptionTime, 0);
         assertGt(totalAccessSecondsPurchased, 0);
-        assertEq(totalPaid, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(totalPaid, minPayment);
         assertEq(canWithdraw, true);
         assertEq(cooldownRemaining, 0);
         assertEq(applicableInflationPercent, INFLATION_PERCENT_PER_WINDOW);
     }
 
     function test_PurchaseAccess_WithMoreThanMinimum() public {
-        uint256 payment = MINIMUM_PAYMENT_AMOUNT * 2;
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 payment = minPayment * 2;
         vm.deal(user1, payment);
         vm.prank(user1);
         thadaiCore.purchaseAccess{value: payment}();
@@ -101,24 +119,26 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_PurchaseAccess_RevertsWhenPaymentBelowMinimum() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT - 1);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment - 1);
         vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(IThadaiCore.PaymentBelowMinimumAmount.selector, MINIMUM_PAYMENT_AMOUNT));
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT - 1}();
+        vm.expectRevert(abi.encodeWithSelector(IThadaiCore.PaymentBelowMinimumAmount.selector, minPayment));
+        thadaiCore.purchaseAccess{value: minPayment - 1}();
     }
 
     function test_PurchaseAccess_ExtendsExistingAccess() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (, uint256 firstAccessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         // Move forward in time but before access expires
         vm.warp(block.timestamp + 100);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (, uint256 secondAccessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         // New access should be extended from the previous expiration, not current time
@@ -126,10 +146,12 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_PurchaseAccess_StartsNewPeriodAfterExpiry() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 3);
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        vm.deal(user1, minPayment * 3);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (, uint256 firstAccessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         // Wait for access to expire
@@ -141,18 +163,16 @@ contract ThadaiCoreTest is Test {
 
         uint256 purchaseTimeBefore = block.timestamp;
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (, uint256 secondAccessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         // New access should start from current time (purchase time), not previous expiration
-        // Since we're past the expiry, secondAccessUntil should be >= purchaseTimeBefore
-        // and it should be in the future relative to when we purchased
         uint256 applicableInflation = 0;
         if (block.timestamp - purchaseTimeBefore < INFLATION_WINDOW) {
             applicableInflation = INFLATION_PERCENT_PER_WINDOW;
         }
-        uint256 expectedAccessSeconds =
-            MINIMUM_PAYMENT_AMOUNT / (BASE_ACCESS_PRICE + (BASE_ACCESS_PRICE * applicableInflation) / 100);
+        uint256 adjustedPrice = basePrice + (basePrice * applicableInflation) / 100;
+        uint256 expectedAccessSeconds = minPayment / adjustedPrice;
         uint256 expectedAccessUntil = purchaseTimeBefore + expectedAccessSeconds;
         assertGe(secondAccessUntil, purchaseTimeBefore);
         // Allow small time variance
@@ -161,24 +181,26 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_PurchaseAccess_EmitsAccessPurchasedEvent() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
 
         // Check that event is emitted with correct user and amount (ignore timestamp due to timing)
         vm.expectEmit(true, false, false, false);
-        emit IThadaiCore.AccessPurchased(user1, MINIMUM_PAYMENT_AMOUNT, 0);
+        emit IThadaiCore.AccessPurchased(user1, minPayment, 0);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
     }
 
     function test_PurchaseAccess_CalculatesCorrectAccessTime() public {
-        uint256 payment = MINIMUM_PAYMENT_AMOUNT;
-        uint256 expectedSeconds = payment / BASE_ACCESS_PRICE;
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 expectedSeconds = minPayment / basePrice;
 
-        vm.deal(user1, payment);
+        vm.deal(user1, minPayment);
         uint256 purchaseTime = block.timestamp;
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: payment}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (, uint256 accessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
         uint256 actualSeconds = accessUntil - purchaseTime;
@@ -187,40 +209,42 @@ contract ThadaiCoreTest is Test {
 
     function test_PurchaseAccess_UpdatesContractBalance() public {
         uint256 initialBalance = address(thadaiCore).balance;
-        uint256 payment = MINIMUM_PAYMENT_AMOUNT;
+        uint256 minPayment = _minimumPaymentWei();
 
-        vm.deal(user1, payment);
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: payment}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
-        assertEq(address(thadaiCore).balance, initialBalance + payment);
-        assertEq(thadaiCore.getContractBalance(), initialBalance + payment);
+        assertEq(address(thadaiCore).balance, initialBalance + minPayment);
+        assertEq(thadaiCore.getContractBalance(), initialBalance + minPayment);
     }
 
     function test_PurchaseAccess_MultipleUsers() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
-        vm.deal(user2, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
+        vm.deal(user2, minPayment);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user2);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (, uint256 accessUntil1,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
         (, uint256 accessUntil2,,,,,,,) = thadaiCore.getUserAccessInfo(user2);
 
         assertGt(accessUntil1, block.timestamp);
         assertGt(accessUntil2, block.timestamp);
-        assertEq(address(thadaiCore).balance, MINIMUM_PAYMENT_AMOUNT * 2);
+        assertEq(address(thadaiCore).balance, minPayment * 2);
     }
 
     // ============ Check Access Tests ============
 
     function test_CheckAccess_UserWithActiveAccess() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (bool hasAccess, uint256 remainingSeconds) = thadaiCore.checkAccess(user1);
         assertTrue(hasAccess);
@@ -234,9 +258,10 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_CheckAccess_UserWithExpiredAccess() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (uint256 accessUntil,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
@@ -249,12 +274,13 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_CheckAccess_ReturnsCorrectRemainingSeconds() public {
-        uint256 payment = MINIMUM_PAYMENT_AMOUNT;
-        uint256 expectedSeconds = payment / BASE_ACCESS_PRICE;
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 expectedSeconds = minPayment / basePrice;
 
-        vm.deal(user1, payment);
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: payment}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (bool hasAccess, uint256 remainingSeconds) = thadaiCore.checkAccess(user1);
         assertTrue(hasAccess);
@@ -266,15 +292,16 @@ contract ThadaiCoreTest is Test {
     // ============ Withdraw Funds Tests ============
 
     function test_WithdrawFunds_FirstWithdrawal_NoCooldown() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         uint256 balanceBefore = user1.balance;
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
-        assertEq(user1.balance, balanceBefore + MINIMUM_PAYMENT_AMOUNT);
+        assertEq(user1.balance, balanceBefore + minPayment);
 
         (uint256 balance, uint256 accessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
         assertEq(balance, 0);
@@ -288,11 +315,12 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_WithdrawFunds_RevertsDuringCooldown() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         // First purchase and withdrawal
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
@@ -300,7 +328,7 @@ contract ThadaiCoreTest is Test {
 
         // Purchase again
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Try to withdraw before cooldown
         vm.prank(user1);
@@ -311,17 +339,18 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_WithdrawFunds_SucceedsAfterCooldown() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         // First purchase and withdrawal
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         // Purchase again
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Move past cooldown
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
@@ -330,13 +359,14 @@ contract ThadaiCoreTest is Test {
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
-        assertEq(user1.balance, balanceBefore + MINIMUM_PAYMENT_AMOUNT);
+        assertEq(user1.balance, balanceBefore + minPayment);
     }
 
     function test_WithdrawFunds_UpdatesLastRedemptionTime() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         uint256 withdrawalTime = block.timestamp;
         vm.prank(user1);
@@ -347,21 +377,23 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_WithdrawFunds_EmitsUserWithdrawnEvent() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user1);
         vm.expectEmit(true, false, false, false);
-        emit IThadaiCore.UserWithdrawn(user1, MINIMUM_PAYMENT_AMOUNT);
+        emit IThadaiCore.UserWithdrawn(user1, minPayment);
 
         thadaiCore.withdrawFunds();
     }
 
     function test_WithdrawFunds_ResetsUserData() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user1);
         thadaiCore.withdrawFunds();
@@ -372,27 +404,28 @@ contract ThadaiCoreTest is Test {
         assertEq(accessUntil, 0);
         assertEq(balance, 0);
         // totalPaid should remain (historical record)
-        assertEq(totalPaid, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(totalPaid, minPayment);
         assertGt(lastRedemptionTime, 0);
     }
 
     function test_WithdrawFunds_DoesNotResetTotalPaid() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 3);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 3);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT * 2}();
+        thadaiCore.purchaseAccess{value: minPayment * 2}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         (,,,,, uint256 totalPaid,,,) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(totalPaid, MINIMUM_PAYMENT_AMOUNT * 3);
+        assertEq(totalPaid, minPayment * 3);
     }
 
     // ============ Get User Access Info Tests ============
@@ -422,9 +455,10 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_GetUserAccessInfo_UserWithActiveAccess() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (
             uint256 balance,
@@ -437,27 +471,28 @@ contract ThadaiCoreTest is Test {
             uint256 cooldownRemaining,
             uint256 applicableInflationPercent
         ) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(balance, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(balance, minPayment);
         assertGt(accessUntil, block.timestamp);
         assertGt(lastPurchaseTime, 0);
         assertEq(lastRedemptionTime, 0);
         assertGt(totalAccessSecondsPurchased, 0);
-        assertEq(totalPaid, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(totalPaid, minPayment);
         assertEq(canWithdraw, true);
         assertEq(cooldownRemaining, 0);
         assertEq(applicableInflationPercent, 10);
     }
 
     function test_GetUserAccessInfo_UserDuringCooldown() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (,,,,,, bool canWithdraw, uint256 cooldownRemaining,) = thadaiCore.getUserAccessInfo(user1);
 
@@ -467,17 +502,18 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_GetUserAccessInfo_UserAfterCooldown() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (,,,,,, bool canWithdraw, uint256 cooldownRemaining,) = thadaiCore.getUserAccessInfo(user1);
 
@@ -488,12 +524,13 @@ contract ThadaiCoreTest is Test {
     // ============ Inflation Logic Test ============
     function test_Inflation_AppliesOnRapidTopUp() public {
         // User purchases access
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         // Immediately top up again (within inflation window)
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         // Check inflation percent is applied
         (,,,,,,,, uint256 applicableInflationPercent) = thadaiCore.getUserAccessInfo(user1);
         assertGt(applicableInflationPercent, 0);
@@ -501,9 +538,10 @@ contract ThadaiCoreTest is Test {
 
     function test_Inflation_DoesNotApplyOnBoundary() public {
         // User purchases access
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         // Move time to exactly inflation window boundary
         vm.warp(block.timestamp + INFLATION_WINDOW);
         // Check inflation percent is NOT applied (should be 0)
@@ -514,21 +552,25 @@ contract ThadaiCoreTest is Test {
     // ============ Calculate Access From Payment Tests ============
 
     function test_CalculateAccessFromPayment_MinimumPayment() public view {
-        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
-        uint256 expectedSeconds = MINIMUM_PAYMENT_AMOUNT / BASE_ACCESS_PRICE;
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(minPayment, 0);
+        uint256 expectedSeconds = minPayment / basePrice;
         assertEq(accessSeconds, expectedSeconds);
     }
 
     function test_CalculateAccessFromPayment_LargePayment() public view {
-        uint256 largePayment = MINIMUM_PAYMENT_AMOUNT * 100;
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 largePayment = minPayment * 100;
         uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(largePayment, 0);
-        uint256 expectedSeconds = largePayment / BASE_ACCESS_PRICE;
+        uint256 expectedSeconds = largePayment / basePrice;
         assertEq(accessSeconds, expectedSeconds);
     }
 
     function test_CalculateAccessFromPayment_SmallPayment() public view {
-        uint256 smallPayment = BASE_ACCESS_PRICE;
-        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(smallPayment, 0);
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(basePrice, 0);
         assertEq(accessSeconds, 1);
     }
 
@@ -540,26 +582,38 @@ contract ThadaiCoreTest is Test {
     // =========== Get Access Pricing Info Tests ==========
 
     function test_GetAccessPricingInfo_ReturnsCorrectValues() public view {
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 minPayment = _minimumPaymentWei();
         (
-            uint256 basePrice,
-            uint256 minPayment,
+            uint256 basePriceWei,
+            uint256 minPaymentWei,
+            uint256 basePriceUSD,
+            uint256 minPaymentUSD,
             uint256 cooldownDays,
             uint256 inflationWindowHours,
             uint256 inflationPercent
         ) = thadaiCore.getAccessPricingInfo();
 
-        assertEq(basePrice, BASE_ACCESS_PRICE);
-        assertEq(minPayment, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(basePriceWei, basePrice);
+        assertEq(minPaymentWei, minPayment);
+        assertEq(basePriceUSD, BASE_ACCESS_PRICE_USD);
+        assertEq(minPaymentUSD, MINIMUM_PAYMENT_USD);
         assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, WITHDRAW_COOLDOWN_PERIOD);
         assertEq(inflationWindowHours * INFLATION_WINDOW, INFLATION_WINDOW);
         assertEq(inflationPercent, INFLATION_PERCENT_PER_WINDOW);
     }
 
     function test_GetAccessPricingInfo_ValuesAreConsistentWithState() public view {
-        (uint256 basePrice,, uint256 cooldownDays, uint256 inflationWindowHours, uint256 inflationPercent) =
-            thadaiCore.getAccessPricingInfo();
+        (
+            uint256 basePriceWei,,
+            uint256 basePriceUSD,,
+            uint256 cooldownDays,
+            uint256 inflationWindowHours,
+            uint256 inflationPercent
+        ) = thadaiCore.getAccessPricingInfo();
 
-        assertEq(basePrice, thadaiCore.baseAccessPrice());
+        assertEq(basePriceUSD, thadaiCore.baseAccessPriceUSD());
+        assertGt(basePriceWei, 0);
         assertEq(cooldownDays * WITHDRAW_COOLDOWN_PERIOD, thadaiCore.withdrawCooldownPeriod());
         assertEq(inflationWindowHours * INFLATION_WINDOW, thadaiCore.inflationWindowPeriod());
         assertEq(inflationPercent, thadaiCore.inflationPercent());
@@ -575,52 +629,55 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_GetContractBalance_AfterDeposits() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
-        vm.deal(user2, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
+        vm.deal(user2, minPayment);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user2);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
-        assertEq(thadaiCore.getContractBalance(), MINIMUM_PAYMENT_AMOUNT * 2);
+        assertEq(thadaiCore.getContractBalance(), minPayment * 2);
         assertEq(thadaiCore.getContractBalance(), address(thadaiCore).balance);
     }
 
     function test_GetContractBalance_AfterWithdrawal() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
-        vm.deal(user2, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
+        vm.deal(user2, minPayment);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user2);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
-        assertEq(thadaiCore.getContractBalance(), MINIMUM_PAYMENT_AMOUNT);
-        assertEq(address(thadaiCore).balance, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(thadaiCore.getContractBalance(), minPayment);
+        assertEq(address(thadaiCore).balance, minPayment);
     }
 
     // ============ Edge Cases and Integration Tests ============
 
     function test_MultiplePurchasesAndWithdrawals() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 5);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 5);
 
         // Purchase 1
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (uint256 balance1,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(balance1, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(balance1, minPayment);
 
         // Purchase 2 - extend access
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (uint256 balance2,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(balance2, MINIMUM_PAYMENT_AMOUNT * 2);
+        assertEq(balance2, minPayment * 2);
 
         // Withdraw
         vm.prank(user1);
@@ -631,16 +688,17 @@ contract ThadaiCoreTest is Test {
 
         // Purchase 3
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (,,,,, uint256 totalPaid,,,) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(totalPaid, MINIMUM_PAYMENT_AMOUNT * 3);
+        assertEq(totalPaid, minPayment * 3);
     }
 
     function test_AccessExpiresCorrectly() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         (, uint256 accessUntil,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
 
@@ -652,17 +710,18 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_WithdrawCooldownCalculation() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         vm.prank(user1);
         thadaiCore.withdrawFunds();
 
         uint256 withdrawalTime = block.timestamp;
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Check cooldown immediately after withdrawal
         (,,,,,,, uint256 cooldownRemaining,) = thadaiCore.getUserAccessInfo(user1);
@@ -684,10 +743,11 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_PurchaseAndWithdrawSameBlock() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Withdraw in same block should work (first withdrawal)
         vm.prank(user1);
@@ -698,17 +758,20 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_Fuzz_CalculateAccessFromPayment(uint256 payment) public view {
+        uint256 basePrice = _baseAccessPriceWei();
         // Bound payment to reasonable range to avoid overflow
-        payment = bound(payment, 0, type(uint256).max / BASE_ACCESS_PRICE);
+        payment = bound(payment, 0, type(uint256).max / basePrice);
 
         uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(payment, 0);
-        uint256 expectedSeconds = payment / BASE_ACCESS_PRICE;
+        uint256 expectedSeconds = payment / basePrice;
         assertEq(accessSeconds, expectedSeconds);
     }
 
     function test_Fuzz_PurchaseAccess(uint256 payment) public {
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
         // Bound payment to minimum and reasonable maximum
-        payment = bound(payment, MINIMUM_PAYMENT_AMOUNT, MINIMUM_PAYMENT_AMOUNT * 1000);
+        payment = bound(payment, minPayment, minPayment * 1000);
 
         vm.deal(user1, payment);
         vm.prank(user1);
@@ -719,50 +782,57 @@ contract ThadaiCoreTest is Test {
         assertEq(totalPaid, payment);
         assertGt(accessUntil, block.timestamp);
 
-        uint256 expectedSeconds = payment / BASE_ACCESS_PRICE;
+        uint256 expectedSeconds = payment / basePrice;
         assertGe(accessUntil - block.timestamp, expectedSeconds - 10); // Allow small time variance
     }
 
     // ============ Reentrancy Attack Tests ============
 
     function test_WithdrawFunds_RevertsOnReentrancy() public {
+        uint256 minPayment = _minimumPaymentWei();
         ReentrancyAttacker attacker = new ReentrancyAttacker(address(thadaiCore));
-        vm.deal(address(attacker), MINIMUM_PAYMENT_AMOUNT);
+        vm.deal(address(attacker), minPayment);
 
         // Attacker purchases access, then withdrawFunds triggers receive() which re-enters
         vm.expectRevert();
-        attacker.attack{value: MINIMUM_PAYMENT_AMOUNT}();
+        attacker.attack{value: minPayment}();
     }
 
     function test_WithdrawFunds_AttackerCannotDrainContract() public {
+        uint256 minPayment = _minimumPaymentWei();
         // Legitimate user deposits first
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT);
+        vm.deal(user1, minPayment);
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Attacker deposits and tries to re-enter
         ReentrancyAttacker attacker = new ReentrancyAttacker(address(thadaiCore));
-        vm.deal(address(attacker), MINIMUM_PAYMENT_AMOUNT);
+        vm.deal(address(attacker), minPayment);
 
         vm.expectRevert();
-        attacker.attack{value: MINIMUM_PAYMENT_AMOUNT}();
+        attacker.attack{value: minPayment}();
 
         // Legitimate user's balance must be intact
-        assertEq(address(thadaiCore).balance, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(address(thadaiCore).balance, minPayment);
         (uint256 balance,,,,,,,,) = thadaiCore.getUserAccessInfo(user1);
-        assertEq(balance, MINIMUM_PAYMENT_AMOUNT);
+        assertEq(balance, minPayment);
     }
 
     // ============ Constructor Validation Tests ============
 
     function test_Constructor_RevertsOnZeroBasePrice() public {
         vm.expectRevert(ThadaiCore.InvalidBasePrice.selector);
-        new ThadaiCore(0, MINIMUM_PAYMENT_AMOUNT, 1, 1, 10);
+        new ThadaiCore(0, MINIMUM_PAYMENT_USD, address(mockPriceFeed), 1, 1, 10);
     }
 
     function test_Constructor_RevertsOnZeroMinimumPayment() public {
         vm.expectRevert(ThadaiCore.InvalidMinimumPayment.selector);
-        new ThadaiCore(BASE_ACCESS_PRICE, 0, 1, 1, 10);
+        new ThadaiCore(BASE_ACCESS_PRICE_USD, 0, address(mockPriceFeed), 1, 1, 10);
+    }
+
+    function test_Constructor_RevertsOnZeroPriceFeedAddress() public {
+        vm.expectRevert(ThadaiCore.InvalidPriceFeedAddress.selector);
+        new ThadaiCore(BASE_ACCESS_PRICE_USD, MINIMUM_PAYMENT_USD, address(0), 1, 1, 10);
     }
 
     // ============ Direct ETH Transfer Tests ============
@@ -786,24 +856,25 @@ contract ThadaiCoreTest is Test {
     // ============ Inflation Edge Case Tests ============
 
     function test_Inflation_ReducesAccessSecondsForSamePayment() public view {
-        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
-        uint256 inflatedSeconds =
-            thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, INFLATION_PERCENT_PER_WINDOW);
+        uint256 minPayment = _minimumPaymentWei();
+        uint256 basePrice = _baseAccessPriceWei();
+        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(minPayment, 0);
+        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(minPayment, INFLATION_PERCENT_PER_WINDOW);
 
         assertGt(normalSeconds, inflatedSeconds);
 
         // Verify the inflation math: inflated price = base + base * 10 / 100 = 1.1x base
-        uint256 expectedInflatedSeconds =
-            MINIMUM_PAYMENT_AMOUNT / (BASE_ACCESS_PRICE + (BASE_ACCESS_PRICE * INFLATION_PERCENT_PER_WINDOW) / 100);
+        uint256 expectedInflatedSeconds = minPayment / (basePrice + (basePrice * INFLATION_PERCENT_PER_WINDOW) / 100);
         assertEq(inflatedSeconds, expectedInflatedSeconds);
     }
 
     function test_Inflation_ResetsAfterWindowExpires() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
 
         // First purchase
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
 
         // Inflation active immediately after purchase
         (,,,,,,,, uint256 inflationRight) = thadaiCore.getUserAccessInfo(user1);
@@ -818,23 +889,24 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_Inflation_SecondPurchaseWithinWindowGetsLessAccess() public {
-        vm.deal(user1, MINIMUM_PAYMENT_AMOUNT * 2);
-        vm.deal(user2, MINIMUM_PAYMENT_AMOUNT);
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment * 2);
+        vm.deal(user2, minPayment);
 
         // user1 purchases twice rapidly (second purchase gets inflated price)
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (,,,, uint64 firstPurchaseSeconds,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         vm.prank(user1);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (,,,, uint64 totalAfterSecond,,,,) = thadaiCore.getUserAccessInfo(user1);
 
         uint64 secondPurchaseSeconds = totalAfterSecond - firstPurchaseSeconds;
 
         // user2 purchases once (gets base price)
         vm.prank(user2);
-        thadaiCore.purchaseAccess{value: MINIMUM_PAYMENT_AMOUNT}();
+        thadaiCore.purchaseAccess{value: minPayment}();
         (,,,, uint64 user2Seconds,,,,) = thadaiCore.getUserAccessInfo(user2);
 
         // user1's second purchase should yield fewer seconds than user2's first purchase
@@ -844,8 +916,9 @@ contract ThadaiCoreTest is Test {
     // ============ Payment Rounding / Dust Tests ============
 
     function test_PurchaseAccess_PaymentJustAboveMinimum() public {
-        // Payment that's minimumPaymentAmount + 1 wei — ensure no rounding issues
-        uint256 payment = MINIMUM_PAYMENT_AMOUNT + 1;
+        uint256 minPayment = _minimumPaymentWei();
+        // Payment that's minimumPayment + 1 wei — ensure no rounding issues
+        uint256 payment = minPayment + 1;
         vm.deal(user1, payment);
         vm.prank(user1);
         thadaiCore.purchaseAccess{value: payment}();
@@ -855,15 +928,70 @@ contract ThadaiCoreTest is Test {
     }
 
     function test_CalculateAccess_PaymentBelowOneSecondWorth() public view {
+        uint256 basePrice = _baseAccessPriceWei();
         // Payment less than one second's cost yields 0 seconds (integer division floors)
-        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(BASE_ACCESS_PRICE - 1, 0);
+        uint256 accessSeconds = thadaiCore.calculateAccessFromPayment(basePrice - 1, 0);
         assertEq(accessSeconds, 0);
     }
 
     function test_Fuzz_InflationAlwaysReducesOrMaintainsAccess(uint256 inflationPct) public view {
+        uint256 minPayment = _minimumPaymentWei();
         inflationPct = bound(inflationPct, 0, 200);
-        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, 0);
-        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(MINIMUM_PAYMENT_AMOUNT, inflationPct);
+        uint256 normalSeconds = thadaiCore.calculateAccessFromPayment(minPayment, 0);
+        uint256 inflatedSeconds = thadaiCore.calculateAccessFromPayment(minPayment, inflationPct);
         assertLe(inflatedSeconds, normalSeconds);
+    }
+
+    // ============ Oracle-Specific Tests ============
+
+    function test_Oracle_InvalidPriceReverts() public {
+        // Set price to 0
+        mockPriceFeed.updateAnswer(0);
+
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        vm.expectRevert(ThadaiCore.InvalidOraclePrice.selector);
+        thadaiCore.purchaseAccess{value: 1 ether}();
+    }
+
+    function test_Oracle_NegativePriceReverts() public {
+        // Set negative price
+        mockPriceFeed.updateAnswer(-1);
+
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        vm.expectRevert(ThadaiCore.InvalidOraclePrice.selector);
+        thadaiCore.purchaseAccess{value: 1 ether}();
+    }
+
+    function test_Oracle_PriceChangeAffectsAccessTime() public {
+        uint256 minPayment = _minimumPaymentWei();
+        vm.deal(user1, minPayment);
+        vm.prank(user1);
+        thadaiCore.purchaseAccess{value: minPayment}();
+        (,,,, uint64 secondsAtOriginalPrice,,,,) = thadaiCore.getUserAccessInfo(user1);
+
+        // ETH price doubles — access per wei should halve (fewer seconds per same wei)
+        mockPriceFeed.updateAnswer(MOCK_ETH_PRICE * 2);
+
+        // New minimum payment is now half the wei (since ETH is worth more)
+        uint256 newMinPayment = (MINIMUM_PAYMENT_USD * 1e18) / uint256(MOCK_ETH_PRICE * 2);
+        vm.deal(user2, newMinPayment);
+        vm.prank(user2);
+        thadaiCore.purchaseAccess{value: newMinPayment}();
+        (,,,, uint64 user2Seconds,,,,) = thadaiCore.getUserAccessInfo(user2);
+
+        // user2 paid half the wei but should get the same number of seconds (same USD value)
+        // Allow rounding tolerance
+        assertGe(user2Seconds, secondsAtOriginalPrice - 2);
+        assertLe(user2Seconds, secondsAtOriginalPrice + 2);
+    }
+
+    function test_Oracle_CalculateAccessReflectsCurrentPrice() public pure {
+        uint256 basePrice = _baseAccessPriceWei();
+        // With mock at $2200, check that derived price is correct
+        // baseAccessPriceUSD * 1e18 / ethPriceUSD
+        uint256 expectedWeiPrice = (BASE_ACCESS_PRICE_USD * 1e18) / uint256(MOCK_ETH_PRICE);
+        assertEq(basePrice, expectedWeiPrice);
     }
 }

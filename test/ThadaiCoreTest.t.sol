@@ -605,10 +605,8 @@ contract ThadaiCoreTest is Test {
 
     function test_GetAccessPricingInfo_ValuesAreConsistentWithState() public view {
         (
-            uint256 basePriceWei,
-            ,
-            uint256 basePriceUSD,
-            ,
+            uint256 basePriceWei,,
+            uint256 basePriceUSD,,
             uint256 cooldownDays,
             uint256 inflationWindowHours,
             uint256 inflationPercent

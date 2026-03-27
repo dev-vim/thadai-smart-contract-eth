@@ -18,7 +18,6 @@ contract ThadaiCoreTest is Test {
 
     // Mock ETH/USD price: $2200 with 8 decimals
     int256 public constant MOCK_ETH_PRICE = 220000000000; // 2200 * 1e8
-    uint256 public constant STALE_PRICE_THRESHOLD = 3600; // 1 hour
 
     uint256 public constant WITHDRAW_COOLDOWN_PERIOD = 86400; // 1 day in seconds
     uint256 public constant INFLATION_WINDOW = 3600; // 1 hour in seconds
@@ -54,10 +53,6 @@ contract ThadaiCoreTest is Test {
 
     function test_Constructor_SetsPriceFeed() public view {
         assertEq(address(thadaiCore.priceFeed()), address(mockPriceFeed));
-    }
-
-    function test_Constructor_SetsStalePriceThreshold() public view {
-        assertEq(thadaiCore.stalePriceThreshold(), STALE_PRICE_THRESHOLD);
     }
 
     function test_Constructor_SetsWithdrawCooldownPeriod() public view {
@@ -423,7 +418,6 @@ contract ThadaiCoreTest is Test {
         thadaiCore.withdrawFunds();
 
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
-        mockPriceFeed.updateAnswer(MOCK_ETH_PRICE); // refresh oracle timestamp
 
         vm.prank(user1);
         thadaiCore.purchaseAccess{value: minPayment * 2}();
@@ -517,7 +511,6 @@ contract ThadaiCoreTest is Test {
         thadaiCore.withdrawFunds();
 
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
-        mockPriceFeed.updateAnswer(MOCK_ETH_PRICE); // refresh oracle timestamp
 
         vm.prank(user1);
         thadaiCore.purchaseAccess{value: minPayment}();
@@ -687,7 +680,6 @@ contract ThadaiCoreTest is Test {
 
         // Wait for cooldown
         vm.warp(block.timestamp + thadaiCore.withdrawCooldownPeriod());
-        mockPriceFeed.updateAnswer(MOCK_ETH_PRICE); // refresh oracle timestamp
 
         // Purchase 3
         vm.prank(user1);
@@ -825,22 +817,17 @@ contract ThadaiCoreTest is Test {
 
     function test_Constructor_RevertsOnZeroBasePrice() public {
         vm.expectRevert(ThadaiCore.InvalidBasePrice.selector);
-        new ThadaiCore(0, MINIMUM_PAYMENT_USD, address(mockPriceFeed), STALE_PRICE_THRESHOLD, 1, 1, 10);
+        new ThadaiCore(0, MINIMUM_PAYMENT_USD, address(mockPriceFeed), 1, 1, 10);
     }
 
     function test_Constructor_RevertsOnZeroMinimumPayment() public {
         vm.expectRevert(ThadaiCore.InvalidMinimumPayment.selector);
-        new ThadaiCore(BASE_ACCESS_PRICE_USD, 0, address(mockPriceFeed), STALE_PRICE_THRESHOLD, 1, 1, 10);
+        new ThadaiCore(BASE_ACCESS_PRICE_USD, 0, address(mockPriceFeed), 1, 1, 10);
     }
 
     function test_Constructor_RevertsOnZeroPriceFeedAddress() public {
         vm.expectRevert(ThadaiCore.InvalidPriceFeedAddress.selector);
-        new ThadaiCore(BASE_ACCESS_PRICE_USD, MINIMUM_PAYMENT_USD, address(0), STALE_PRICE_THRESHOLD, 1, 1, 10);
-    }
-
-    function test_Constructor_RevertsOnZeroStalePriceThreshold() public {
-        vm.expectRevert(ThadaiCore.InvalidStalePriceThreshold.selector);
-        new ThadaiCore(BASE_ACCESS_PRICE_USD, MINIMUM_PAYMENT_USD, address(mockPriceFeed), 0, 1, 1, 10);
+        new ThadaiCore(BASE_ACCESS_PRICE_USD, MINIMUM_PAYMENT_USD, address(0), 1, 1, 10);
     }
 
     // ============ Direct ETH Transfer Tests ============
@@ -953,17 +940,6 @@ contract ThadaiCoreTest is Test {
     }
 
     // ============ Oracle-Specific Tests ============
-
-    function test_Oracle_StaleFeedReverts() public {
-        uint256 minPayment = _minimumPaymentWei();
-        // Advance time past the stale threshold
-        vm.warp(block.timestamp + STALE_PRICE_THRESHOLD + 1);
-
-        vm.deal(user1, minPayment);
-        vm.prank(user1);
-        vm.expectRevert(ThadaiCore.StalePriceFeed.selector);
-        thadaiCore.purchaseAccess{value: minPayment}();
-    }
 
     function test_Oracle_InvalidPriceReverts() public {
         // Set price to 0

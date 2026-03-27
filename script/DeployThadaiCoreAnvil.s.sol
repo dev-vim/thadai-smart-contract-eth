@@ -18,9 +18,6 @@ contract DeployThadaiCoreAnvil is Script {
     // Same pricing constants as DeployThadaiCore (production)
     uint256 public constant BASE_ACCESS_PRICE_USD = 138888; // $0.00138888/sec (8-dec)
     uint256 public constant MINIMUM_PAYMENT_USD = 200000000; // $2.00 (8-dec)
-    // Stale threshold set very high for local testing — the mock feed never truly goes stale,
-    // and Anvil's block.timestamp jumps to wall-clock time on reload.
-    uint256 public constant STALE_PRICE_THRESHOLD = 365 days;
     uint16 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
     uint16 public constant INFLATION_WINDOW_IN_HOURS = 1;
     uint16 public constant INFLATION_PERCENT_PER_WINDOW = 10;
@@ -37,7 +34,6 @@ contract DeployThadaiCoreAnvil is Script {
             BASE_ACCESS_PRICE_USD,
             MINIMUM_PAYMENT_USD,
             address(mockPriceFeed),
-            STALE_PRICE_THRESHOLD,
             WITHDRAW_COOLDOWN_PERIOD_IN_DAYS,
             INFLATION_WINDOW_IN_HOURS,
             INFLATION_PERCENT_PER_WINDOW

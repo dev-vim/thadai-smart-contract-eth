@@ -17,8 +17,6 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     error InvalidBasePrice();
     error InvalidMinimumPayment();
     error InvalidPriceFeedAddress();
-    error InvalidStalePriceThreshold();
-    error StalePriceFeed();
     error InvalidOraclePrice();
 
     // Struct to store user access information
@@ -41,9 +39,6 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
     /// @notice Chainlink ETH/USD price feed
     AggregatorV3Interface public immutable priceFeed;
 
-    /// @notice Maximum age (in seconds) before the price feed is considered stale
-    uint256 public immutable stalePriceThreshold;
-
     /// @notice Time period users must wait between withdrawals
     uint256 public immutable withdrawCooldownPeriod;
 
@@ -60,7 +55,6 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
      * @param _baseAccessPriceUSD Price for 1 second of access in USD (8-decimal scale)
      * @param _minimumPaymentUSD Minimum payment required in USD (8-decimal scale)
      * @param _priceFeed Address of the Chainlink ETH/USD price feed
-     * @param _stalePriceThreshold Maximum age (in seconds) before the price feed is considered stale
      * @param _withdrawCooldownInDays Days users must wait between withdrawals
      * @param _inflationWindowInHours Hours within which inflation applies
      * @param _inflationPercent Percent increase in price during inflation window
@@ -69,7 +63,6 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
         uint256 _baseAccessPriceUSD,
         uint256 _minimumPaymentUSD,
         address _priceFeed,
-        uint256 _stalePriceThreshold,
         uint16 _withdrawCooldownInDays,
         uint16 _inflationWindowInHours,
         uint16 _inflationPercent
@@ -77,11 +70,9 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
         if (_baseAccessPriceUSD == 0) revert InvalidBasePrice();
         if (_minimumPaymentUSD == 0) revert InvalidMinimumPayment();
         if (_priceFeed == address(0)) revert InvalidPriceFeedAddress();
-        if (_stalePriceThreshold == 0) revert InvalidStalePriceThreshold();
         baseAccessPriceUSD = _baseAccessPriceUSD;
         minimumPaymentUSD = _minimumPaymentUSD;
         priceFeed = AggregatorV3Interface(_priceFeed);
-        stalePriceThreshold = _stalePriceThreshold;
         withdrawCooldownPeriod = _withdrawCooldownInDays * 1 days;
         inflationWindowPeriod = _inflationWindowInHours * 1 hours;
         inflationPercent = _inflationPercent;
@@ -325,13 +316,12 @@ contract ThadaiCore is IThadaiCore, ReentrancyGuard {
 
     /**
      * @notice Get the latest ETH/USD price from the Chainlink feed
-     * @dev Validates that the price is positive and not stale
+     * @dev Validates that the price is positive
      * @return price ETH price in USD with 8 decimals
      */
     function _getLatestEthPriceUSD() internal view returns (uint256 price) {
-        (, int256 answer,, uint256 updatedAt,) = priceFeed.latestRoundData();
+        (, int256 answer,,,) = priceFeed.latestRoundData();
         if (answer <= 0) revert InvalidOraclePrice();
-        if (block.timestamp - updatedAt > stalePriceThreshold) revert StalePriceFeed();
         return uint256(answer);
     }
 

@@ -19,9 +19,6 @@ contract DeployThadaiCore is Script {
     // Chainlink ETH/USD feed address (Sepolia by default)
     address public constant PRICE_FEED_ADDRESS = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
 
-    // Maximum staleness for oracle price (seconds)
-    uint256 public constant STALE_PRICE_THRESHOLD = 3600; // 1 hour
-
     uint16 public constant WITHDRAW_COOLDOWN_PERIOD_IN_DAYS = 1;
 
     uint16 public constant INFLATION_WINDOW_IN_HOURS = 1;
@@ -32,7 +29,6 @@ contract DeployThadaiCore is Script {
         uint256 base_access_price_usd,
         uint256 minimum_payment_usd,
         address price_feed,
-        uint256 stale_price_threshold,
         uint16 withdraw_cooldown_period_in_days,
         uint16 inflation_window_in_hours,
         uint16 inflation_percent_per_window
@@ -42,7 +38,6 @@ contract DeployThadaiCore is Script {
             base_access_price_usd,
             minimum_payment_usd,
             price_feed,
-            stale_price_threshold,
             withdraw_cooldown_period_in_days,
             inflation_window_in_hours,
             inflation_percent_per_window
@@ -56,7 +51,6 @@ contract DeployThadaiCore is Script {
             BASE_ACCESS_PRICE_USD,
             MINIMUM_PAYMENT_USD,
             PRICE_FEED_ADDRESS,
-            STALE_PRICE_THRESHOLD,
             WITHDRAW_COOLDOWN_PERIOD_IN_DAYS,
             INFLATION_WINDOW_IN_HOURS,
             INFLATION_PERCENT_PER_WINDOW

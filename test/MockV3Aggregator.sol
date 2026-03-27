@@ -53,9 +53,4 @@ contract MockV3Aggregator is AggregatorV3Interface {
         _updatedAt = block.timestamp;
         _roundId++;
     }
-
-    /// @notice Update the mock timestamp without changing the price (to simulate stale feed)
-    function updateTimestamp(uint256 newTimestamp) external {
-        _updatedAt = newTimestamp;
-    }
 }

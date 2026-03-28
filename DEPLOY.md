@@ -60,9 +60,12 @@ forge script script/DeployThadaiCore.s.sol:DeployThadaiCore \
 
 The contract will be deployed with these constructor parameters (defined in `DeployThadaiCore.s.sol`):
 
-- **Base Access Price**
-- **Minimum Payment**
-- **Withdrawal Cooldown**
+- **Base Access Price USD** — Price per second of access (8-decimal scale)
+- **Minimum Payment USD** — Minimum payment required (8-decimal scale)
+- **Price Feed Address** — Chainlink ETH/USD oracle
+- **Withdrawal Cooldown** — Days between withdrawals
+- **Inflation Window** — Hours within which inflation applies
+- **Inflation Percent** — Price increase for rapid re-purchases
 
 ## Step 3: Verify Deployment
 
@@ -158,6 +161,45 @@ chmod +x deploy.sh
 - **Persistent State**: To persist state, you can use Anvil's `--state` flag or fork a mainnet/testnet
 - **Contract Address**: The address may vary if you've deployed other contracts first (nonce-based)
 - **Testing**: After deployment, you can test purchasing access using the extension or directly via cast/forge
+
+## Deploying to Sepolia Testnet
+
+### Prerequisites
+
+- **Sepolia ETH** from a faucet (e.g. sepoliafaucet.com or Alchemy's faucet)
+- **Sepolia RPC URL** from Alchemy, Infura, or another provider
+- **Etherscan API key** (optional, for contract verification)
+
+### Deploy
+
+```bash
+forge script script/DeployThadaiCore.s.sol:DeployThadaiCore \
+  --rpc-url <YOUR_SEPOLIA_RPC_URL> \
+  --private-key <YOUR_PRIVATE_KEY> \
+  --broadcast \
+  --verify \
+  --etherscan-api-key <YOUR_ETHERSCAN_API_KEY>
+```
+
+The deploy script uses the Sepolia Chainlink ETH/USD feed (`0x694AA1769357215DE4FAC081bf1f309aDC325306`) by default.
+
+### Verify Deployment
+
+```bash
+# Check contract config
+cast call <CONTRACT_ADDRESS> "baseAccessPriceUSD()(uint256)" --rpc-url <YOUR_SEPOLIA_RPC_URL>
+
+# Check live pricing (returns basePriceWei, minimumPaymentWei, baseAccessPriceUSD, minimumPaymentUSD, ethPriceUSD)
+cast call <CONTRACT_ADDRESS> "getAccessPricingInfo()(uint256,uint256,uint256,uint256,uint256)" --rpc-url <YOUR_SEPOLIA_RPC_URL>
+
+# Purchase access (adjust value based on getAccessPricingInfo minimumPaymentWei)
+cast send <CONTRACT_ADDRESS> "purchaseAccess()" --value 0.02ether --rpc-url <YOUR_SEPOLIA_RPC_URL> --private-key <YOUR_PRIVATE_KEY>
+
+# Check access status
+cast call <CONTRACT_ADDRESS> "checkAccess(address)(bool,uint256)" <YOUR_ADDRESS> --rpc-url <YOUR_SEPOLIA_RPC_URL>
+```
+
+> **Security:** Never commit private keys or API keys to the repository. Use environment variables or a `.env` file (already in `.gitignore`).
 
 ## Testing the Deployment
 

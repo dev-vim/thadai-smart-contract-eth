@@ -18,15 +18,15 @@ ThadaiCore is an **intentionally ownerless and immutable** smart contract. There
 | **Reentrancy** | `withdrawFunds()` uses OpenZeppelin's `ReentrancyGuard` (`nonReentrant` modifier). State is also updated before the external call (checks-effects-interactions pattern). Both defenses are tested with a malicious attacker contract. |
 | **Integer overflow** | Solidity ^0.8.19 has built-in overflow checks. `totalAccessSecondsPurchased` uses `uint64`, which can hold ~584 billion years of seconds. |
 | **Direct ETH transfers** | The contract has no `receive()` or `fallback()` function. Raw ETH transfers revert. Users must go through `purchaseAccess()`. |
-| **Constructor misconfiguration** | Constructor validates that `baseAccessPrice` and `minimumPaymentAmount` are non-zero, preventing division-by-zero in `calculateAccessFromPayment()`. |
+| **Constructor misconfiguration** | Constructor validates that `baseAccessPriceUSD`, `minimumPaymentUSD`, and `priceFeed` address are non-zero, preventing division-by-zero and invalid oracle configuration. |
 | **Withdrawal gaming** | A cooldown period between withdrawals prevents rapid deposit-withdraw cycling. |
-| **Price staleness** | Current pricing is hardcoded at deploy time. A Chainlink price feed integration is planned for a future version to dynamically reflect ETH/USD rates. |
+| **Oracle failure** | If the Chainlink price feed returns a non-positive price, the contract reverts with `InvalidOraclePrice`. This prevents purchases at a zero or negative ETH price. |
 
 ## What This Contract Does NOT Do
 
 - It does **not** hold funds on behalf of a protocol or treasury. All ETH belongs to individual users.
 - It does **not** have upgrade or migration logic. If a new version is needed, a new contract is deployed independently.
-- It does **not** interact with external contracts or oracles (current version). There is no SSRF, oracle manipulation, or flash loan attack surface.
+- It interacts with a single external contract: the **Chainlink AggregatorV3Interface** price feed (read-only). There is no SSRF or flash loan attack surface. The oracle address is immutable and set at deploy time.
 
 ## Testing
 

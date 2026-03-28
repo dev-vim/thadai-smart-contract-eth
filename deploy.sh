@@ -10,7 +10,7 @@ echo "Deploying ThadaiCore to Anvil..."
 echo "RPC URL: $RPC_URL"
 echo ""
 
-forge script script/DeployThadaiCore.s.sol:DeployThadaiCore \
+forge script script/DeployThadaiCoreAnvil.s.sol:DeployThadaiCoreAnvil \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast

@@ -87,17 +87,24 @@ See [DEPLOY.md](./DEPLOY.md) for detailed deployment instructions using Foundry 
 
 ## Pricing (Production Deploy)
 
-Current production parameters target **$2,200/ETH**:
+Prices are denominated in USD (8-decimal scale, matching Chainlink) and converted to ETH at transaction time via the **Chainlink ETH/USD price feed**:
 
 | Parameter | Value | Target |
 |-----------|-------|--------|
-| Base access price | `631,313,131,313 wei/sec` | ~$5 for 1 hour |
-| Minimum payment | `909,090,909,090,909 wei` | ~$2 minimum |
+| Base access price | `138,888` (8-dec USD) | ~$5 for 1 hour |
+| Minimum payment | `200,000,000` (8-dec USD) | $2 minimum |
+| Chainlink price feed | `0x694AA1769357215DE4FAC081bf1f309aDC325306` | Sepolia ETH/USD |
 | Withdrawal cooldown | 1 day | Prevents rapid cycling |
 | Inflation window | 1 hour | Discourages impulsive re-purchases |
 | Inflation percent | 10% | Price increase for rapid top-ups |
 
-> **Note:** These values are hardcoded at deploy time. A Chainlink price feed integration is planned for a future version to dynamically adjust for ETH/USD volatility.
+> **Note:** All parameters are immutable — set at deploy time and cannot be changed. The Chainlink oracle ensures ETH amounts automatically adjust for price volatility.
+
+## Live Deployment (Sepolia)
+
+The contract is deployed on the Sepolia testnet for anyone to try:
+
+- **Contract Address:** [`0xbD85aC44B2d0236f2a913CC003850899AE7a06af`](https://sepolia.etherscan.io/address/0xbd85ac44b2d0236f2a913cc003850899ae7a06af)
 
 ## Security
 
